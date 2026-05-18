@@ -1,0 +1,187 @@
+flowchart TD
+  n_dep_cargo_anyhow["anyhow"]
+  n_dep_cargo_blake3["blake3"]
+  n_dep_cargo_chrono["chrono"]
+  n_dep_cargo_clap["clap"]
+  n_dep_cargo_criterion["criterion"]
+  n_project_memory_cpp["memory.cpp"]
+  n_dep_cargo_rusqlite["rusqlite"]
+  n_dep_cargo_serde["serde"]
+  n_dep_cargo_serde_json["serde_json"]
+  n_dep_cargo_tempfile["tempfile"]
+  n_dep_cargo_thiserror["thiserror"]
+  n_dep_cargo_tiny_http["tiny_http"]
+  n_dep_cargo_ureq["ureq"]
+  n_dep_cargo_uuid["uuid"]
+  n_source_docs_adr_0001_sqlite_local_first_md["ADR 0001: SQLite As The Core Store"]
+  n_source_docs_adr_0002_mcp_read_only_default_md["ADR 0002: MCP Read-Only By Default"]
+  n_source_docs_adr_0003_map_as_product_surface_md["ADR 0003: Map As A First-Class Product Surface"]
+  n_source_docs_architecture_md["Architecture"]
+  n_source_docs_c_api_md["C API"]
+  n_source_docs_cli_md["CLI Reference"]
+  n_source_contributing_md["Contributing"]
+  n_source_docs_dev_workflow_md["Developer Workflow"]
+  n_source_docs_integrations_md["Integrations"]
+  n_source_docs_mcp_md["MCP"]
+  n_source_docs_maps_md["Maps"]
+  n_source_memory_cpp_demo_decisions_md["memory.cpp decisions map"]
+  n_workspace_launch_demo["launch-demo"]
+  n_8fb74677_4c0e_4e02_b997_789b87bfa47f["memory.cpp aims to be SQLite for engineering memory: one local memory layer for developers and AI apps."]
+  n_09d945d8_e7d1_44cb_9632_ec39aa068861["Use SQLite as the core store so memory stays local-first, portable, auditable, and easy to back up."]
+  n_53c858a6_ff3e_4331_90f3_20937c5b236f["Hybrid retrieval mixes semantic similarity, keyword matching, entity overlap, recency, importance, and confidence."]
+  n_ec337dd5_894d_4aba_bfb6_1f3c6238cf46["Expose memory through MCP so Cursor, Claude, Codex, and VS Code can use memory.cpp without custom integrations."]
+  n_4995ca54_2b61_4c68_a075_9b1d54269d20["The viral demo is memory proxy plus memory map evolution: every local chat remembers and every repo can explain itself."]
+  n_df32996e_1d34_4ab7_9717_3b7215b5d8a3["Bug: the expanded Clap command tree hit a stack-overflow edge case, so v0.2.1 keeps a documented pre-parser with dedicated tests."]
+  n_981d198f_5a74_4974_b9ea_3e29bc27d0a6["Fix: split launch-only commands behind a small manual parser, then cover them with smoke tests and parser unit tests."]
+  n_436b6db7_b032_4cbd_a45e_4edd264378b6["memory dev morning should summarize yesterday's work, open conflicts, recent decisions, recent bugs, and the next recommended action."]
+  n_82609b79_34eb_412d_9a01_8bc0f59ae5a6["memory map evolution should show idea, storage, retrieval, MCP, proxy, attach, and launch polish as a chronological project story."]
+  n_480c4857_0e76_452b_9e20_d0d4aabe487c["Attach helpers should default to read-only MCP with workspace scoping and credential redaction so the first integration feels trustworthy."]
+  n_2213719b_37c1_4224_964b_24ee4e7ebba7["memory doctor should verify database health, runtime state, map exportability, MCP safety defaults, and Ollama reachability before launch."]
+  n_event_1["created workspace"]
+  n_event_2["stored memory"]
+  n_event_3["stored memory"]
+  n_event_4["stored memory"]
+  n_event_5["stored memory"]
+  n_event_6["stored memory"]
+  n_event_7["stored memory"]
+  n_event_8["stored memory"]
+  n_event_9["stored memory"]
+  n_event_10["stored memory"]
+  n_event_11["stored memory"]
+  n_event_13["queued candidate memory for review"]
+  n_event_12["stored memory"]
+  n_09d945d8_e7d1_44cb_9632_ec39aa068861 -->|introduced_by| n_53c858a6_ff3e_4331_90f3_20937c5b236f
+  n_2213719b_37c1_4224_964b_24ee4e7ebba7 -->|introduced_by| n_event_1
+  n_436b6db7_b032_4cbd_a45e_4edd264378b6 -->|introduced_by| n_82609b79_34eb_412d_9a01_8bc0f59ae5a6
+  n_480c4857_0e76_452b_9e20_d0d4aabe487c -->|introduced_by| n_2213719b_37c1_4224_964b_24ee4e7ebba7
+  n_4995ca54_2b61_4c68_a075_9b1d54269d20 -->|introduced_by| n_df32996e_1d34_4ab7_9717_3b7215b5d8a3
+  n_53c858a6_ff3e_4331_90f3_20937c5b236f -->|introduced_by| n_ec337dd5_894d_4aba_bfb6_1f3c6238cf46
+  n_82609b79_34eb_412d_9a01_8bc0f59ae5a6 -->|introduced_by| n_480c4857_0e76_452b_9e20_d0d4aabe487c
+  n_8fb74677_4c0e_4e02_b997_789b87bfa47f -->|introduced_by| n_09d945d8_e7d1_44cb_9632_ec39aa068861
+  n_981d198f_5a74_4974_b9ea_3e29bc27d0a6 -->|introduced_by| n_436b6db7_b032_4cbd_a45e_4edd264378b6
+  n_df32996e_1d34_4ab7_9717_3b7215b5d8a3 -->|introduced_by| n_981d198f_5a74_4974_b9ea_3e29bc27d0a6
+  n_ec337dd5_894d_4aba_bfb6_1f3c6238cf46 -->|introduced_by| n_4995ca54_2b61_4c68_a075_9b1d54269d20
+  n_event_1 -->|introduced_by| n_event_2
+  n_event_10 -->|introduced_by| n_event_11
+  n_event_11 -->|introduced_by| n_event_13
+  n_event_13 -->|introduced_by| n_event_12
+  n_event_2 -->|introduced_by| n_event_3
+  n_event_3 -->|introduced_by| n_event_4
+  n_event_4 -->|introduced_by| n_event_5
+  n_event_5 -->|introduced_by| n_event_6
+  n_event_6 -->|introduced_by| n_event_7
+  n_event_7 -->|introduced_by| n_event_8
+  n_event_8 -->|introduced_by| n_event_9
+  n_event_9 -->|introduced_by| n_event_10
+  n_project_memory_cpp -->|introduced_by| n_09d945d8_e7d1_44cb_9632_ec39aa068861
+  n_project_memory_cpp -->|introduced_by| n_2213719b_37c1_4224_964b_24ee4e7ebba7
+  n_project_memory_cpp -->|introduced_by| n_436b6db7_b032_4cbd_a45e_4edd264378b6
+  n_project_memory_cpp -->|introduced_by| n_480c4857_0e76_452b_9e20_d0d4aabe487c
+  n_project_memory_cpp -->|introduced_by| n_4995ca54_2b61_4c68_a075_9b1d54269d20
+  n_project_memory_cpp -->|introduced_by| n_53c858a6_ff3e_4331_90f3_20937c5b236f
+  n_project_memory_cpp -->|introduced_by| n_82609b79_34eb_412d_9a01_8bc0f59ae5a6
+  n_project_memory_cpp -->|introduced_by| n_8fb74677_4c0e_4e02_b997_789b87bfa47f
+  n_project_memory_cpp -->|introduced_by| n_981d198f_5a74_4974_b9ea_3e29bc27d0a6
+  n_project_memory_cpp -->|depends_on| n_dep_cargo_anyhow
+  n_project_memory_cpp -->|depends_on| n_dep_cargo_blake3
+  n_project_memory_cpp -->|depends_on| n_dep_cargo_chrono
+  n_project_memory_cpp -->|depends_on| n_dep_cargo_clap
+  n_project_memory_cpp -->|depends_on| n_dep_cargo_criterion
+  n_project_memory_cpp -->|depends_on| n_dep_cargo_rusqlite
+  n_project_memory_cpp -->|depends_on| n_dep_cargo_serde
+  n_project_memory_cpp -->|depends_on| n_dep_cargo_serde_json
+  n_project_memory_cpp -->|depends_on| n_dep_cargo_tempfile
+  n_project_memory_cpp -->|depends_on| n_dep_cargo_thiserror
+  n_project_memory_cpp -->|depends_on| n_dep_cargo_tiny_http
+  n_project_memory_cpp -->|depends_on| n_dep_cargo_ureq
+  n_project_memory_cpp -->|depends_on| n_dep_cargo_uuid
+  n_project_memory_cpp -->|introduced_by| n_df32996e_1d34_4ab7_9717_3b7215b5d8a3
+  n_project_memory_cpp -->|introduced_by| n_ec337dd5_894d_4aba_bfb6_1f3c6238cf46
+  n_project_memory_cpp -->|introduced_by| n_event_1
+  n_project_memory_cpp -->|introduced_by| n_event_10
+  n_project_memory_cpp -->|introduced_by| n_event_11
+  n_project_memory_cpp -->|introduced_by| n_event_12
+  n_project_memory_cpp -->|introduced_by| n_event_13
+  n_project_memory_cpp -->|introduced_by| n_event_2
+  n_project_memory_cpp -->|introduced_by| n_event_3
+  n_project_memory_cpp -->|introduced_by| n_event_4
+  n_project_memory_cpp -->|introduced_by| n_event_5
+  n_project_memory_cpp -->|introduced_by| n_event_6
+  n_project_memory_cpp -->|introduced_by| n_event_7
+  n_project_memory_cpp -->|introduced_by| n_event_8
+  n_project_memory_cpp -->|introduced_by| n_event_9
+  n_source_contributing_md -->|belongs_to| n_project_memory_cpp
+  n_source_docs_adr_0001_sqlite_local_first_md -->|belongs_to| n_project_memory_cpp
+  n_source_docs_adr_0002_mcp_read_only_default_md -->|belongs_to| n_project_memory_cpp
+  n_source_docs_adr_0003_map_as_product_surface_md -->|belongs_to| n_project_memory_cpp
+  n_source_docs_architecture_md -->|belongs_to| n_project_memory_cpp
+  n_source_docs_c_api_md -->|belongs_to| n_project_memory_cpp
+  n_source_docs_cli_md -->|belongs_to| n_project_memory_cpp
+  n_source_docs_dev_workflow_md -->|belongs_to| n_project_memory_cpp
+  n_source_docs_integrations_md -->|belongs_to| n_project_memory_cpp
+  n_source_docs_maps_md -->|belongs_to| n_project_memory_cpp
+  n_source_docs_mcp_md -->|belongs_to| n_project_memory_cpp
+  n_source_memory_cpp_demo_decisions_md -->|belongs_to| n_project_memory_cpp
+  n_workspace_launch_demo -->|belongs_to| n_project_memory_cpp
+
+  classDef milestone fill:#efe3d0,stroke:#6c584c,color:#1f2421;
+  classDef decision fill:#d8f3dc,stroke:#2d6a4f,color:#081c15;
+  classDef bug fill:#ffe5d9,stroke:#9d0208,color:#370617;
+  classDef fix fill:#e0fbfc,stroke:#005f73,color:#001219;
+  classDef file fill:#f5f3ff,stroke:#4338ca,color:#1e1b4b;
+  classDef component fill:#fff3bf,stroke:#bc6c25,color:#4a2c0b;
+  classDef workspace fill:#cfe1b9,stroke:#4f772d,color:#132a13;
+  classDef entity fill:#f1f3f5,stroke:#495057,color:#212529;
+  classDef source fill:#f8f9fa,stroke:#6c757d,color:#343a40;
+  classDef release fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a;
+  class n_dep_cargo_anyhow component;
+  class n_dep_cargo_blake3 component;
+  class n_dep_cargo_chrono component;
+  class n_dep_cargo_clap component;
+  class n_dep_cargo_criterion component;
+  class n_project_memory_cpp component;
+  class n_dep_cargo_rusqlite component;
+  class n_dep_cargo_serde component;
+  class n_dep_cargo_serde_json component;
+  class n_dep_cargo_tempfile component;
+  class n_dep_cargo_thiserror component;
+  class n_dep_cargo_tiny_http component;
+  class n_dep_cargo_ureq component;
+  class n_dep_cargo_uuid component;
+  class n_source_docs_adr_0001_sqlite_local_first_md source;
+  class n_source_docs_adr_0002_mcp_read_only_default_md source;
+  class n_source_docs_adr_0003_map_as_product_surface_md source;
+  class n_source_docs_architecture_md source;
+  class n_source_docs_c_api_md source;
+  class n_source_docs_cli_md source;
+  class n_source_contributing_md source;
+  class n_source_docs_dev_workflow_md source;
+  class n_source_docs_integrations_md source;
+  class n_source_docs_mcp_md source;
+  class n_source_docs_maps_md source;
+  class n_source_memory_cpp_demo_decisions_md source;
+  class n_workspace_launch_demo workspace;
+  class n_8fb74677_4c0e_4e02_b997_789b87bfa47f decision;
+  class n_09d945d8_e7d1_44cb_9632_ec39aa068861 decision;
+  class n_53c858a6_ff3e_4331_90f3_20937c5b236f file;
+  class n_ec337dd5_894d_4aba_bfb6_1f3c6238cf46 decision;
+  class n_4995ca54_2b61_4c68_a075_9b1d54269d20 decision;
+  class n_df32996e_1d34_4ab7_9717_3b7215b5d8a3 bug;
+  class n_981d198f_5a74_4974_b9ea_3e29bc27d0a6 fix;
+  class n_436b6db7_b032_4cbd_a45e_4edd264378b6 decision;
+  class n_82609b79_34eb_412d_9a01_8bc0f59ae5a6 decision;
+  class n_480c4857_0e76_452b_9e20_d0d4aabe487c decision;
+  class n_2213719b_37c1_4224_964b_24ee4e7ebba7 file;
+  class n_event_1 milestone;
+  class n_event_2 milestone;
+  class n_event_3 milestone;
+  class n_event_4 milestone;
+  class n_event_5 milestone;
+  class n_event_6 milestone;
+  class n_event_7 milestone;
+  class n_event_8 milestone;
+  class n_event_9 milestone;
+  class n_event_10 milestone;
+  class n_event_11 milestone;
+  class n_event_13 milestone;
+  class n_event_12 milestone;

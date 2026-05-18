@@ -1,0 +1,23 @@
+[package]
+name = "memory-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Command-line interface for memory.cpp."
+
+[[bin]]
+name = "memory"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+memory-core = { path = "../memory-core", features = ["http"] }
+serde.workspace = true
+serde_json.workspace = true
+tiny_http.workspace = true
+ureq.workspace = true

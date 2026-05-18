@@ -1,0 +1,32 @@
+[workspace]
+members = [
+    "crates/memory-core",
+    "crates/memory-cli",
+    "crates/memory-capi",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+authors = ["memory.cpp contributors"]
+repository = "https://github.com/memorycpp/memory.cpp"
+homepage = "https://github.com/memorycpp/memory.cpp"
+description = "A tiny, local-first long-term memory engine for AI applications."
+keywords = ["ai", "memory", "sqlite", "embeddings", "retrieval"]
+categories = ["database", "command-line-utilities", "api-bindings"]
+
+[workspace.dependencies]
+anyhow = "1.0"
+blake3 = "1.5"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+clap = { version = "4.5", features = ["derive"] }
+criterion = "0.5"
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tempfile = "3.10"
+thiserror = "1.0"
+tiny_http = "0.12"
+ureq = { version = "2.9", features = ["json"] }
+uuid = { version = "1.8", features = ["v4", "serde"] }

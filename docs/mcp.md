@@ -73,3 +73,13 @@ Agent access is logged to:
 ```
 
 This gives you a local trail of which tools were called and whether they were allowed.
+
+Inspect it from the CLI:
+
+```bash
+memory --db .memory.cpp/memory.db audit-log --limit 20
+```
+
+## Ignore rules still apply
+
+When agents rely on project memory built through `memory import` or `memory dev watch`, both `.memoryignore` and `.gitignore` are respected during file discovery.

@@ -59,7 +59,7 @@ pub fn import_path(
         files: 0,
     };
 
-    let files = collect_files(path, options.recursive)?;
+    let files = collect_importable_files(path, options.recursive)?;
     for file in files {
         report.files += 1;
         let memories = parse_file(&file, options)?;
@@ -105,22 +105,33 @@ pub fn parse_file(path: &Path, options: &ImportOptions) -> Result<Vec<NewMemory>
     }
 }
 
-fn collect_files(path: &Path, recursive: bool) -> Result<Vec<PathBuf>> {
+pub fn collect_importable_files(path: &Path, recursive: bool) -> Result<Vec<PathBuf>> {
     if path.is_file() {
         return Ok(vec![path.to_path_buf()]);
     }
 
     let mut files = Vec::new();
-    collect_dir(path, recursive, &mut files)?;
+    let root = path.to_path_buf();
+    let rules = load_ignore_rules(&root)?;
+    collect_dir(&root, path, recursive, &rules, &mut files)?;
     Ok(files)
 }
 
-fn collect_dir(path: &Path, recursive: bool, files: &mut Vec<PathBuf>) -> Result<()> {
+fn collect_dir(
+    root: &Path,
+    path: &Path,
+    recursive: bool,
+    rules: &[String],
+    files: &mut Vec<PathBuf>,
+) -> Result<()> {
     for entry in fs::read_dir(path)? {
         let entry = entry?;
         let path = entry.path();
+        if is_ignored(root, &path, rules) {
+            continue;
+        }
         if path.is_dir() && recursive {
-            collect_dir(&path, recursive, files)?;
+            collect_dir(root, &path, recursive, rules, files)?;
         } else if path.is_file() && is_importable(&path) {
             files.push(path);
         }
@@ -153,6 +164,102 @@ fn infer_format(path: &Path) -> ImportFormat {
         Some("jsonl") => ImportFormat::Jsonl,
         _ => ImportFormat::Text,
     }
+}
+
+fn load_ignore_rules(root: &Path) -> Result<Vec<String>> {
+    let mut rules = Vec::new();
+    for name in [".memoryignore", ".gitignore"] {
+        let path = root.join(name);
+        if !path.exists() {
+            continue;
+        }
+        let content = fs::read_to_string(path)?;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            rules.push(trimmed.replace('\\', "/"));
+        }
+    }
+    Ok(rules)
+}
+
+fn is_ignored(root: &Path, path: &Path, rules: &[String]) -> bool {
+    let relative = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+
+    rules
+        .iter()
+        .any(|rule| match_ignore_rule(rule, &relative, name))
+}
+
+fn match_ignore_rule(rule: &str, relative: &str, name: &str) -> bool {
+    let normalized = rule.trim_start_matches("./").trim_matches('/');
+    if normalized.is_empty() {
+        return false;
+    }
+
+    if rule.ends_with('/') {
+        return relative == normalized || relative.starts_with(&format!("{normalized}/"));
+    }
+
+    if let Some(ext) = normalized.strip_prefix("*.") {
+        return relative.ends_with(&format!(".{ext}"));
+    }
+
+    if normalized.contains('*') {
+        return wildcard_match(normalized, relative) || wildcard_match(normalized, name);
+    }
+
+    relative == normalized
+        || relative.starts_with(&format!("{normalized}/"))
+        || name == normalized
+        || relative.contains(&format!("/{normalized}/"))
+}
+
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let parts = pattern.split('*').collect::<Vec<_>>();
+    if parts.len() == 1 {
+        return text == pattern;
+    }
+
+    let anchored_start = !pattern.starts_with('*');
+    let anchored_end = !pattern.ends_with('*');
+    let mut cursor = 0usize;
+
+    for (index, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if index == 0 && anchored_start {
+            if !text[cursor..].starts_with(part) {
+                return false;
+            }
+            cursor += part.len();
+            continue;
+        }
+        if let Some(offset) = text[cursor..].find(part) {
+            cursor += offset + part.len();
+        } else {
+            return false;
+        }
+    }
+
+    if anchored_end {
+        if let Some(last) = parts.iter().rev().find(|part| !part.is_empty()) {
+            return text.ends_with(last);
+        }
+    }
+
+    true
 }
 
 fn parse_json(raw: &str, metadata: Value, chunk_chars: usize) -> Result<Vec<NewMemory>> {
@@ -249,4 +356,62 @@ fn chunk_text(text: &str, chunk_chars: usize) -> Vec<String> {
     }
 
     chunks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_ignored, match_ignore_rule, wildcard_match};
+    use std::path::Path;
+
+    #[test]
+    fn wildcard_patterns_match_expected_paths() {
+        assert!(wildcard_match("*.pem", "server.pem"));
+        assert!(wildcard_match("secrets/*", "secrets/app.env"));
+        assert!(wildcard_match(
+            "node_modules/*",
+            "node_modules/react/index.js"
+        ));
+        assert!(!wildcard_match("*.pem", "server.txt"));
+    }
+
+    #[test]
+    fn ignore_rules_match_relative_paths_and_names() {
+        let root = Path::new("repo");
+        let rules = vec![
+            ".env".to_string(),
+            "secrets/".to_string(),
+            "*.pem".to_string(),
+            "node_modules/".to_string(),
+        ];
+
+        assert!(is_ignored(root, Path::new("repo/.env"), &rules));
+        assert!(is_ignored(
+            root,
+            Path::new("repo/secrets/config.json"),
+            &rules
+        ));
+        assert!(is_ignored(root, Path::new("repo/keys/prod.pem"), &rules));
+        assert!(is_ignored(
+            root,
+            Path::new("repo/node_modules/react/index.js"),
+            &rules
+        ));
+        assert!(!is_ignored(root, Path::new("repo/src/main.rs"), &rules));
+    }
+
+    #[test]
+    fn direct_rule_matching_handles_directory_and_file_rules() {
+        assert!(match_ignore_rule(
+            "private/",
+            "private/notes.txt",
+            "notes.txt"
+        ));
+        assert!(match_ignore_rule(".env", ".env", ".env"));
+        assert!(match_ignore_rule(
+            "*.key",
+            "keys/service.key",
+            "service.key"
+        ));
+        assert!(!match_ignore_rule("docs/", "src/docs.rs", "docs.rs"));
+    }
 }

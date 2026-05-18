@@ -19,7 +19,9 @@ pub use engine::MemoryEngine;
 pub use error::{MemoryError, Result};
 pub use eval::{evaluate, EvalCase, EvalReport, EvalResult};
 pub use graph::{extract_entities, Entity, EntityGraph, EntityKind, EntityLink};
-pub use import::{import_path, parse_file, ImportFormat, ImportOptions, ImportReport};
+pub use import::{
+    collect_importable_files, import_path, parse_file, ImportFormat, ImportOptions, ImportReport,
+};
 pub use map::{
     MapCitation, MapDiff, MapEdge, MapEdgeKind, MapNode, MapNodeChange, MapNodeClass,
     MapOutputFormat, MapRequest, MapType, MemoryMap,

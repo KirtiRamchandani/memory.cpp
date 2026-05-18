@@ -43,6 +43,7 @@ These are currently routed through a small pre-parser to avoid a Clap stack-over
 memory edit
 memory restore
 memory demo
+memory audit-log
 memory doctor
 memory dev
 memory map
@@ -67,6 +68,7 @@ memory --db .memory.cpp/memory.db explain "why SQLite" --workspace demo
 
 ```bash
 memory --db .memory.cpp/memory.db demo seed --workspace demo --path .
+memory --db .memory.cpp/memory.db demo reset --workspace demo
 ```
 
 ### Daily development flow
@@ -92,6 +94,7 @@ memory --db .memory.cpp/memory.db map compare before-launch after-launch --works
 memory --db .memory.cpp/memory.db start --workspace demo --proxy
 memory --db .memory.cpp/memory.db status
 memory --db .memory.cpp/memory.db stop
+memory --db .memory.cpp/memory.db audit-log --limit 20
 ```
 
 ## Output guidance
@@ -99,3 +102,4 @@ memory --db .memory.cpp/memory.db stop
 - use `--json` for machine-readable CLI output where available
 - use `--save <path>` with `memory map` when generating HTML, Mermaid, or Markdown files you want to keep
 - use `doctor` before sharing a demo or attaching agents
+- create a `.memoryignore` file before using `import` or `dev watch` on a real repository

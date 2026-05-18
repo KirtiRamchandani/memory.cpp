@@ -10,6 +10,8 @@ memory --db .memory.cpp/memory.db dev watch ./repo --workspace demo --once
 
 This wraps repo-friendly watch behavior and stores imported code/doc chunks as project memory.
 
+`dev watch` respects `.memoryignore` and `.gitignore`, so secrets, build output, and bulky vendor folders can stay out of memory by default.
+
 ## `memory dev morning`
 
 ```bash
@@ -41,4 +43,12 @@ It reconstructs a recent workflow around the topic and produces a model-ready co
 
 ```bash
 memory --db .memory.cpp/memory.db doctor --workspace demo
+```
+
+## `memory audit-log`
+
+When you attach an agent through MCP, you can inspect local usage receipts:
+
+```bash
+memory --db .memory.cpp/memory.db audit-log --limit 20
 ```

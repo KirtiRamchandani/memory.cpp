@@ -16,10 +16,11 @@ use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, Utc};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use memory_core::{
-    evaluate, import_path, parse_file, EvalCase, HashEmbedder, ImportFormat, ImportOptions,
-    MapOutputFormat, MapRequest, MapType, MemoryEdit, MemoryEngine, MemoryKind, MemoryLayer,
-    MemoryPermission, MemorySource, MemoryStatus, NewMemory, OllamaEmbedder,
-    OpenAiCompatibleEmbedder, PersonaProfile, PolicyMode, RecallQuery, SharedEmbedder,
+    collect_importable_files, evaluate, import_path, parse_file, EvalCase, HashEmbedder,
+    ImportFormat, ImportOptions, MapOutputFormat, MapRequest, MapType, MemoryEdit, MemoryEngine,
+    MemoryKind, MemoryLayer, MemoryPermission, MemorySource, MemoryStatus, NewMemory,
+    OllamaEmbedder, OpenAiCompatibleEmbedder, PersonaProfile, PolicyMode, RecallQuery,
+    SharedEmbedder,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -882,7 +883,7 @@ struct ManualStartCli {
 
 #[derive(Debug, Parser)]
 struct ManualDemoCli {
-    #[arg(default_value = "seed", value_parser = ["seed"])]
+    #[arg(default_value = "seed", value_parser = ["seed", "reset"])]
     action: String,
     #[arg(long)]
     workspace: Option<String>,
@@ -898,6 +899,16 @@ struct ManualDoctorCli {
     workspace: Option<String>,
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualAuditLogCli {
+    #[arg(long, default_value_t = 20)]
+    limit: usize,
+    #[arg(long)]
+    json: bool,
+    #[arg(long)]
+    path: Option<PathBuf>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -942,6 +953,16 @@ struct AuditLogEntry<'a> {
     channel: &'a str,
     action: &'a str,
     workspace: Option<&'a str>,
+    allowed: bool,
+    detail: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct StoredAuditLogEntry {
+    recorded_at: DateTime<Utc>,
+    channel: String,
+    action: String,
+    workspace: Option<String>,
     allowed: bool,
     detail: String,
 }
@@ -1258,6 +1279,7 @@ fn print_extended_help() -> Result<()> {
     println!(
         "  doctor                        Diagnose local setup, safety defaults, and runtime health"
     );
+    println!("  audit-log                     Inspect recorded MCP agent access receipts");
     println!("  dev watch|morning|resume      Solo-dev workflow helpers");
     println!("  map [PATH]                    Render evolution/decision/architecture maps");
     println!("  map why <topic>               Explain why a project decision or feature exists");
@@ -1430,12 +1452,21 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
                 std::iter::once(command.clone()).chain(rest.iter().cloned()),
             );
             let engine = build_engine_from_options(&options)?;
-            demo_seed_command(
-                &engine,
-                args.workspace.as_ref(),
-                args.path.as_ref(),
-                args.json,
-            )?;
+            match args.action.as_str() {
+                "seed" => demo_seed_command(
+                    &engine,
+                    args.workspace.as_ref(),
+                    args.path.as_ref(),
+                    args.json,
+                )?,
+                "reset" => demo_reset_command(
+                    &engine,
+                    args.workspace.as_ref(),
+                    args.path.as_ref(),
+                    args.json,
+                )?,
+                _ => unreachable!("demo action is validated by clap"),
+            }
         }
         "doctor" => {
             let args = ManualDoctorCli::parse_from(
@@ -1443,6 +1474,13 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
             );
             let engine = build_engine_from_options(&options)?;
             doctor_command(&engine, &options, args.workspace.as_ref(), args.json)?;
+        }
+        "audit-log" => {
+            let args = ManualAuditLogCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            audit_log_command(&engine, args.limit, args.path.as_deref(), args.json)?;
         }
         _ => return Ok(false),
     }
@@ -1460,7 +1498,16 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         api_key_env: "MEMORY_CPP_OPENAI_API_KEY".to_string(),
     };
     let manual_commands = [
-        "edit", "restore", "dev", "map", "start", "stop", "status", "demo", "doctor",
+        "edit",
+        "restore",
+        "dev",
+        "map",
+        "start",
+        "stop",
+        "status",
+        "demo",
+        "doctor",
+        "audit-log",
     ];
     let mut index = 1usize;
 
@@ -3326,6 +3373,62 @@ fn demo_seed_command(
     Ok(())
 }
 
+fn demo_reset_command(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    path: Option<&PathBuf>,
+    json_output: bool,
+) -> Result<()> {
+    let workspace = workspace
+        .cloned()
+        .or(current_workspace_name(engine)?)
+        .unwrap_or_else(|| "demo".to_string());
+    let repo_root = path
+        .cloned()
+        .or_else(|| env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let demo_dir = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("demo");
+
+    let removed = if demo_dir.exists() {
+        fs::remove_dir_all(&demo_dir)?;
+        true
+    } else {
+        false
+    };
+
+    let report = json!({
+        "workspace": workspace,
+        "repo_path": repo_root,
+        "removed_demo_dir": if removed { Some(demo_dir.to_string_lossy().to_string()) } else { None::<String> },
+        "note": "Removed generated demo artifacts only. Stored demo memories remain in the database so reseeding stays idempotent and existing demo workspaces keep working."
+    });
+
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "demo reset for workspace `{}`",
+            report["workspace"].as_str().unwrap_or("demo")
+        );
+        println!(
+            "removed artifacts: {}",
+            report["removed_demo_dir"].as_str().unwrap_or("none")
+        );
+        println!(
+            "{}",
+            report["note"]
+                .as_str()
+                .unwrap_or("Stored demo memories remain unchanged.")
+        );
+    }
+
+    Ok(())
+}
+
 fn doctor_command(
     engine: &MemoryEngine,
     options: &EngineOptions,
@@ -3508,6 +3611,74 @@ fn doctor_command(
             if let Some(suggestion) = &check.suggestion {
                 println!("  suggestion: {suggestion}");
             }
+        }
+    }
+
+    Ok(())
+}
+
+fn audit_log_command(
+    engine: &MemoryEngine,
+    limit: usize,
+    explicit_path: Option<&Path>,
+    json_output: bool,
+) -> Result<()> {
+    let audit_path = explicit_path.map(Path::to_path_buf).unwrap_or_else(|| {
+        engine
+            .store_path()
+            .parent()
+            .unwrap_or_else(|| Path::new(".memory.cpp"))
+            .join("audit")
+            .join("mcp-access.jsonl")
+    });
+
+    if !audit_path.exists() {
+        if json_output {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "path": audit_path,
+                    "entries": [],
+                    "note": "No audit log has been recorded yet."
+                }))?
+            );
+        } else {
+            println!("no audit log found at {}", audit_path.display());
+            println!("run `memory mcp` or use an attached client to generate access receipts.");
+        }
+        return Ok(());
+    }
+
+    let file = File::open(&audit_path)?;
+    let mut entries = io::BufReader::new(file)
+        .lines()
+        .map_while(|line| line.ok())
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str::<StoredAuditLogEntry>(&line).ok())
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.recorded_at));
+    entries.truncate(limit.max(1));
+
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "path": audit_path,
+                "entries": entries,
+            }))?
+        );
+    } else {
+        println!("audit log: {}", audit_path.display());
+        for entry in entries {
+            println!(
+                "{} | {} | {} | workspace={} | {}",
+                entry.recorded_at.to_rfc3339(),
+                entry.channel,
+                entry.action,
+                entry.workspace.unwrap_or_else(|| "default".to_string()),
+                if entry.allowed { "allowed" } else { "blocked" }
+            );
+            println!("  {}", entry.detail);
         }
     }
 
@@ -4868,37 +5039,7 @@ fn read_eval_cases(file: &Path) -> Result<Vec<EvalCase>> {
 }
 
 fn collect_watch_files(path: &Path) -> Result<Vec<PathBuf>> {
-    if path.is_file() {
-        return Ok(vec![path.to_path_buf()]);
-    }
-
-    let mut files = Vec::new();
-    collect_watch_dir(path, &mut files)?;
-    Ok(files)
-}
-
-fn collect_watch_dir(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in fs::read_dir(path)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            collect_watch_dir(&path, files)?;
-        } else if path.is_file() && is_watchable(&path) {
-            files.push(path);
-        }
-    }
-    Ok(())
-}
-
-fn is_watchable(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.to_ascii_lowercase()),
-        Some(ext) if matches!(
-            ext.as_str(),
-            "txt" | "md" | "markdown" | "json" | "jsonl" | "rs" | "py" | "ts" | "tsx" | "js" | "jsx" | "c" | "cpp" | "h" | "hpp"
-        )
-    )
+    collect_importable_files(path, true).map_err(Into::into)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5399,6 +5540,22 @@ mod tests {
     }
 
     #[test]
+    fn split_manual_args_detects_audit_log_command() {
+        let raw = vec![
+            "memory".to_string(),
+            "--db".to_string(),
+            ".memory.cpp/memory.db".to_string(),
+            "audit-log".to_string(),
+            "--limit".to_string(),
+            "5".to_string(),
+        ];
+        let parsed = split_manual_args(&raw).expect("split should succeed");
+        let (_, command, rest) = parsed.expect("manual command should be detected");
+        assert_eq!(command, "audit-log");
+        assert_eq!(rest, vec!["--limit".to_string(), "5".to_string()]);
+    }
+
+    #[test]
     fn resolve_map_type_prefers_shortcut_flags() {
         let map_type = resolve_map_type(
             CliMapType::Evolution,
@@ -5437,5 +5594,15 @@ mod tests {
         assert!(parsed.evolution);
         assert!(matches!(parsed.output, CliMapOutput::Html));
         assert_eq!(parsed.save.as_deref(), Some(Path::new("demo.html")));
+    }
+
+    #[test]
+    fn demo_command_parses_reset_action() {
+        let parsed =
+            ManualDemoCli::try_parse_from(["demo", "reset", "--workspace", "demo", "--json"])
+                .expect("parse should succeed");
+        assert_eq!(parsed.action, "reset");
+        assert_eq!(parsed.workspace.as_deref(), Some("demo"));
+        assert!(parsed.json);
     }
 }

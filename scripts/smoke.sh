@@ -32,5 +32,17 @@ case "$MCP_RESPONSE" in
   *) echo 'MCP tools/list did not include the expected safe launch tools.' >&2; exit 1 ;;
 esac
 
+MCP_CALL_RESPONSE="$(printf '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_context","arguments":{"query":"MCP integration","workspace":"smoke-demo","tokens":256}}}\n' | cargo run -q -p memory-cli -- --db "$DB" mcp --workspace smoke-demo)"
+case "$MCP_CALL_RESPONSE" in
+  *MCP\ integration*) ;;
+  *) echo 'MCP tools/call did not return the expected context payload.' >&2; exit 1 ;;
+esac
+
+AUDIT_LOG="$(cargo run -q -p memory-cli -- --db "$DB" audit-log --limit 5)"
+case "$AUDIT_LOG" in
+  *memory_context*) ;;
+  *) echo 'Expected memory_context access to be visible in the audit log.' >&2; exit 1 ;;
+esac
+
 [[ -f "$MAP_HTML" ]]
 printf 'Smoke test passed.\n'

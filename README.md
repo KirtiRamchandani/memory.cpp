@@ -72,6 +72,7 @@ The long-term direction is broader than a memory database. The project is trying
 - immutable version history for create/edit/patch/forget/restore
 - patch/supersede flow instead of append-only duplication
 - review inbox for uncertain or sensitive candidate memory
+- `.memoryignore` and `.gitignore` respected during import/watch
 
 ### Visual maps
 
@@ -101,6 +102,7 @@ The long-term direction is broader than a memory database. The project is trying
 - workspace-scoped MCP access
 - agent audit log
 - candidate-memory tool for safer unattended agent behavior
+- `memory audit-log` for local agent-access receipts
 
 ## Quickstart
 
@@ -114,6 +116,7 @@ memory --db .memory.cpp/memory.db demo seed --workspace demo --path .
 memory --db .memory.cpp/memory.db dev morning --workspace demo
 memory --db .memory.cpp/memory.db map . --workspace demo --type evolution --output html --save .memory.cpp/demo/evolution.html
 memory --db .memory.cpp/memory.db doctor --workspace demo
+memory --db .memory.cpp/memory.db audit-log --limit 10
 ```
 
 ## The best launch surfaces
@@ -160,6 +163,7 @@ By default, `memory mcp` is intentionally conservative:
 - secret redaction on responses
 - audit log at `.memory.cpp/audit/mcp-access.jsonl`
 - `memory_add_candidate` exposed before direct write tools
+- `.memoryignore` patterns respected by import and watch flows
 
 Enable direct write tools only if you really want them:
 
@@ -203,7 +207,8 @@ PowerShell:
 - [Proxy](docs/proxy.md)
 - [Developer Workflow](docs/dev-workflow.md)
 - [Safety](docs/safety.md)
-- [Troubleshooting](docs/troubleshooting.md)\n- [Map Examples](docs/examples/demo-evolution.mmd)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Map Examples](docs/examples/README.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Roadmap](docs/ROADMAP.md)
 

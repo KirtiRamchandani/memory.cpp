@@ -30,9 +30,20 @@ cargo run -p memory-cli -- --db $db status
 cargo run -p memory-cli -- --db $db stop
 
 $mcpRequest = '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
-$mcpResponse = $mcpRequest | cargo run -q -p memory-cli -- --db $db mcp --workspace smoke-demo
+$mcpResponse = (($mcpRequest | cargo run -q -p memory-cli -- --db $db mcp --workspace smoke-demo) | Out-String)
 if ($mcpResponse -notmatch 'memory_map' -or $mcpResponse -notmatch 'memory_add_candidate') {
     throw 'MCP tools/list did not include the expected safe launch tools.'
+}
+
+$mcpCall = '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_context","arguments":{"query":"MCP integration","workspace":"smoke-demo","tokens":256}}}'
+$mcpCallResponse = (($mcpCall | cargo run -q -p memory-cli -- --db $db mcp --workspace smoke-demo) | Out-String)
+if ($mcpCallResponse -notmatch 'MCP integration') {
+    throw 'MCP tools/call did not return the expected context payload.'
+}
+
+$auditLog = ((cargo run -q -p memory-cli -- --db $db audit-log --limit 5) | Out-String)
+if ($auditLog -notmatch 'memory_context') {
+    throw 'Expected memory_context access to be visible in the audit log.'
 }
 
 if (-not (Test-Path $mapHtml)) {

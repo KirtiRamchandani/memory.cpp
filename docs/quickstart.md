@@ -26,6 +26,23 @@ memory --db .memory.cpp/memory.db init --workspace demo
 
 This creates the local SQLite-backed memory file and sets `demo` as the default workspace.
 
+Optional but recommended before watching or importing a real repo:
+
+```text
+.memoryignore
+```
+
+Example:
+
+```text
+.env
+*.pem
+*.key
+secrets/
+node_modules/
+target/
+```
+
 ## 3. Seed the launch demo
 
 ```bash
@@ -119,6 +136,14 @@ memory --db .memory.cpp/memory.db doctor --workspace demo
 - runtime state
 - API port availability
 
+## 8.5. Inspect agent access receipts
+
+```bash
+memory --db .memory.cpp/memory.db audit-log --limit 10
+```
+
+This reads the local MCP access log so you can verify which tools were used and whether any operation was blocked.
+
 ## 9. Try the proxy demo
 
 If Ollama is running locally:
@@ -151,4 +176,4 @@ On Windows PowerShell:
 ./scripts/smoke.ps1
 ```
 
-The smoke script covers init, demo seed, map export, doctor, runtime start/stop, and MCP tool listing.
+The smoke script covers init, demo seed, map export, doctor, runtime start/stop, MCP tool listing, and audit-log visibility.

@@ -12,6 +12,7 @@
 - workspace-scoped MCP access
 - audit log for agent access
 - response redaction for MCP output
+- `.memoryignore` and `.gitignore` support for import/watch discovery
 
 ## Review inbox
 
@@ -25,12 +26,28 @@ memory --db .memory.cpp/memory.db inbox approve <id>
 memory --db .memory.cpp/memory.db inbox reject <id>
 ```
 
+## `.memoryignore`
+
+You can keep secrets and irrelevant files out of memory ingestion with a repo-local `.memoryignore` file.
+
+Example:
+
+```text
+.env
+*.pem
+*.key
+secrets/
+node_modules/
+target/
+```
+
+Both `memory import` and `memory dev watch` respect `.memoryignore` and `.gitignore`.
+
 ## What is intentionally not claimed yet
 
-These are important, but not finished in the current release:
+These are still important future layers:
 
 - encrypted live database storage
-- `.memoryignore`
 - team approval workflows
 - sync
 - organization policy inheritance

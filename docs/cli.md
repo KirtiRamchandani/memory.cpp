@@ -46,6 +46,9 @@ memory demo
 memory audit-log
 memory doctor
 memory dev
+memory extract
+memory git
+memory ignore
 memory map
 memory start
 memory stop
@@ -77,6 +80,28 @@ memory --db .memory.cpp/memory.db demo reset --workspace demo
 memory --db .memory.cpp/memory.db dev watch ./repo --workspace demo
 memory --db .memory.cpp/memory.db dev morning --workspace demo
 memory --db .memory.cpp/memory.db dev resume "proxy launch" --workspace demo
+memory --db .memory.cpp/memory.db dev explain-repo . --workspace demo
+memory --db .memory.cpp/memory.db dev next --workspace demo
+```
+
+### Git-aware extraction
+
+```bash
+memory --db .memory.cpp/memory.db git summary --since 14d
+memory --db .memory.cpp/memory.db git decisions --since 30d
+memory --db .memory.cpp/memory.db git bugs --since 30d
+memory --db .memory.cpp/memory.db git ingest --workspace demo --since 14d
+memory --db .memory.cpp/memory.db git map --workspace demo --output html --save .memory.cpp/demo/git-evolution.html
+```
+
+### Candidate extraction and ignore rules
+
+```bash
+memory --db .memory.cpp/memory.db extract . --workspace demo --dry-run --limit 8
+memory --db .memory.cpp/memory.db extract --from-git --workspace demo --since 30d --dry-run
+memory --db .memory.cpp/memory.db import . --workspace demo --preview-redactions
+memory ignore init
+memory ignore check README.md
 ```
 
 ### Maps
@@ -103,3 +128,4 @@ memory --db .memory.cpp/memory.db audit-log --limit 20
 - use `--save <path>` with `memory map` when generating HTML, Mermaid, or Markdown files you want to keep
 - use `doctor` before sharing a demo or attaching agents
 - create a `.memoryignore` file before using `import` or `dev watch` on a real repository
+- use `proxy --learn --approval-required` when you want passive learning without unattended direct writes

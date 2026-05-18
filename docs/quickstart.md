@@ -43,6 +43,12 @@ node_modules/
 target/
 ```
 
+Or initialize it automatically:
+
+```bash
+memory ignore init
+```
+
 ## 3. Seed the launch demo
 
 ```bash
@@ -83,9 +89,26 @@ Open the generated HTML file in a browser. The export is self-contained and incl
 ```bash
 memory --db .memory.cpp/memory.db dev morning --workspace demo
 memory --db .memory.cpp/memory.db dev resume "MCP integration" --workspace demo
+memory --db .memory.cpp/memory.db dev explain-repo . --workspace demo
+memory --db .memory.cpp/memory.db dev next --workspace demo
 ```
 
 `dev morning` is the best quick proof that the repo can explain itself.
+
+## 5.5. Pull signal from the repo itself
+
+```bash
+memory --db .memory.cpp/memory.db git summary --since 14d
+memory --db .memory.cpp/memory.db git ingest --workspace demo --since 14d
+memory --db .memory.cpp/memory.db extract . --workspace demo --dry-run --limit 8
+memory --db .memory.cpp/memory.db import . --workspace demo --preview-redactions
+```
+
+This gives you three useful layers:
+
+- `git summary`: what changed recently
+- `git ingest`: what should probably become memory
+- `extract --dry-run`: what docs/comments would turn into candidate memory
 
 ## 6. Attach a coding agent
 
@@ -155,7 +178,7 @@ memory --db .memory.cpp/memory.db attach ollama --workspace demo --start-proxy
 Or run the proxy directly:
 
 ```bash
-memory --db .memory.cpp/memory.db proxy --listen 127.0.0.1:7332 --upstream http://127.0.0.1:11434 --workspace demo
+memory --db .memory.cpp/memory.db proxy --listen 127.0.0.1:7332 --upstream http://127.0.0.1:11434 --workspace demo --learn --approval-required
 ```
 
 Then point any OpenAI-compatible client at:
@@ -176,4 +199,4 @@ On Windows PowerShell:
 ./scripts/smoke.ps1
 ```
 
-The smoke script covers init, demo seed, map export, doctor, runtime start/stop, MCP tool listing, and audit-log visibility.
+The smoke script covers init, demo seed, git summary, extraction dry-run, map export, doctor, runtime start/stop, MCP tool listing, and audit-log visibility.

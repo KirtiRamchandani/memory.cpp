@@ -22,6 +22,21 @@ New-Item -ItemType Directory -Force -Path $dbDir | Out-Null
 cargo run -p memory-cli -- --db $db init --workspace smoke-demo
 cargo run -p memory-cli -- --db $db demo seed --workspace smoke-demo --path .
 cargo run -p memory-cli -- --db $db dev morning --workspace smoke-demo
+cargo run -p memory-cli -- --db $db dev explain-repo . --workspace smoke-demo
+cargo run -p memory-cli -- --db $db dev next --workspace smoke-demo
+cargo run -p memory-cli -- --db $db git summary --since 14d
+$extractPreview = ((cargo run -q -p memory-cli -- --db $db extract . --workspace smoke-demo --dry-run --limit 5 --json) | Out-String)
+if ($extractPreview -notmatch 'candidates') {
+    throw 'Expected extract dry-run output to include candidates.'
+}
+$redactionPreview = ((cargo run -q -p memory-cli -- --db $db import . --workspace smoke-demo --preview-redactions --json) | Out-String)
+if ($redactionPreview -notmatch 'hits') {
+    throw 'Expected import redaction preview output to include hits.'
+}
+$ignoreCheck = ((cargo run -q -p memory-cli -- --db $db ignore check README.md) | Out-String)
+if ($ignoreCheck -notmatch 'included|ignored') {
+    throw 'Expected ignore check to report whether the path is included or ignored.'
+}
 cargo run -p memory-cli -- --db $db map . --workspace smoke-demo --type evolution --output html --save $mapHtml
 cargo run -p memory-cli -- --db $db doctor --workspace smoke-demo
 cargo run -p memory-cli -- --db $db start --workspace smoke-demo

@@ -20,7 +20,8 @@ pub use error::{MemoryError, Result};
 pub use eval::{evaluate, EvalCase, EvalReport, EvalResult};
 pub use graph::{extract_entities, Entity, EntityGraph, EntityKind, EntityLink};
 pub use import::{
-    collect_importable_files, import_path, parse_file, ImportFormat, ImportOptions, ImportReport,
+    check_ignored_path, collect_importable_files, import_path, parse_file, ImportFormat,
+    ImportOptions, ImportReport, DEFAULT_MEMORYIGNORE,
 };
 pub use map::{
     MapCitation, MapDiff, MapEdge, MapEdgeKind, MapNode, MapNodeChange, MapNodeClass,

@@ -90,8 +90,15 @@ The long-term direction is broader than a memory database. The project is trying
 - `memory dev watch`
 - `memory dev morning`
 - `memory dev resume`
+- `memory dev explain-repo`
+- `memory dev next`
 - `memory doctor`
 - `memory demo`
+- `memory extract`
+- `memory git summary`
+- `memory git ingest`
+- `memory ignore init`
+- `memory ignore check`
 
 ### AI integration surfaces
 
@@ -114,6 +121,8 @@ The short version:
 memory --db .memory.cpp/memory.db init --workspace demo
 memory --db .memory.cpp/memory.db demo seed --workspace demo --path .
 memory --db .memory.cpp/memory.db dev morning --workspace demo
+memory --db .memory.cpp/memory.db git summary --since 14d
+memory --db .memory.cpp/memory.db extract . --workspace demo --dry-run --limit 5
 memory --db .memory.cpp/memory.db map . --workspace demo --type evolution --output html --save .memory.cpp/demo/evolution.html
 memory --db .memory.cpp/memory.db doctor --workspace demo
 memory --db .memory.cpp/memory.db audit-log --limit 10
@@ -137,6 +146,16 @@ memory --db .memory.cpp/memory.db dev morning --workspace demo
 
 This gives a repo recap with recent changes, decisions, bug/fix memory, conflicts, and a suggested next action.
 
+### `memory git summary` and `memory extract`
+
+```bash
+memory --db .memory.cpp/memory.db git summary --since 14d
+memory --db .memory.cpp/memory.db git ingest --workspace demo --since 14d
+memory --db .memory.cpp/memory.db extract . --workspace demo --dry-run --limit 5
+```
+
+These turn repository history and docs/comments into candidate engineering memory without introducing new schema tables.
+
 ### `memory attach cursor`
 
 ```bash
@@ -148,7 +167,7 @@ This writes a local MCP config for Cursor with safe defaults.
 ### `memory proxy`
 
 ```bash
-memory --db .memory.cpp/memory.db proxy --listen 127.0.0.1:7332 --upstream http://127.0.0.1:11434 --workspace demo
+memory --db .memory.cpp/memory.db proxy --listen 127.0.0.1:7332 --upstream http://127.0.0.1:11434 --workspace demo --learn --approval-required
 ```
 
 Point any OpenAI-compatible client at `http://127.0.0.1:7332/v1`.
@@ -202,6 +221,11 @@ PowerShell:
 
 - [Quickstart](docs/quickstart.md)
 - [CLI Reference](docs/cli.md)
+- [Attach](docs/attach.md)
+- [Memory Lifecycle](docs/memory-lifecycle.md)
+- [Retrieval](docs/retrieval.md)
+- [Embeddings](docs/embeddings.md)
+- [API](docs/api.md)
 - [Maps](docs/maps.md)
 - [MCP](docs/mcp.md)
 - [Proxy](docs/proxy.md)

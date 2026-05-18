@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env, fs,
     fs::{File, OpenOptions},
     io::{self, BufRead, Write},
@@ -16,11 +16,11 @@ use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, Utc};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use memory_core::{
-    collect_importable_files, evaluate, import_path, parse_file, EvalCase, HashEmbedder,
-    ImportFormat, ImportOptions, MapOutputFormat, MapRequest, MapType, MemoryEdit, MemoryEngine,
-    MemoryKind, MemoryLayer, MemoryPermission, MemorySource, MemoryStatus, NewMemory,
+    check_ignored_path, collect_importable_files, evaluate, import_path, parse_file, EvalCase,
+    HashEmbedder, ImportFormat, ImportOptions, MapOutputFormat, MapRequest, MapType, MemoryEdit,
+    MemoryEngine, MemoryKind, MemoryLayer, MemoryPermission, MemorySource, MemoryStatus, NewMemory,
     OllamaEmbedder, OpenAiCompatibleEmbedder, PersonaProfile, PolicyMode, RecallQuery,
-    SharedEmbedder,
+    SharedEmbedder, DEFAULT_MEMORYIGNORE,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -358,6 +358,9 @@ enum Command {
         no_recursive: bool,
 
         #[arg(long)]
+        preview_redactions: bool,
+
+        #[arg(long)]
         json: bool,
     },
     Watch {
@@ -519,6 +522,18 @@ enum Command {
 
         #[arg(long, default_value_t = 1_200)]
         tokens: usize,
+
+        #[arg(long)]
+        learn: bool,
+
+        #[arg(long)]
+        approval_required: bool,
+
+        #[arg(long, default_value_t = 0.58)]
+        min_confidence: f32,
+
+        #[arg(long)]
+        dry_run: bool,
     },
     Mcp {
         #[arg(long)]
@@ -723,6 +738,25 @@ enum DevCommand {
         #[arg(long)]
         json: bool,
     },
+    ExplainRepo {
+        path: Option<PathBuf>,
+
+        #[arg(long)]
+        workspace: Option<String>,
+
+        #[arg(long)]
+        json: bool,
+    },
+    Next {
+        #[arg(long)]
+        workspace: Option<String>,
+
+        #[arg(long, default_value_t = 5)]
+        limit: usize,
+
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -762,6 +796,33 @@ struct ManualEditCli {
 #[derive(Debug, Parser)]
 struct ManualRestoreCli {
     id: String,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualInitCli {
+    #[arg(long)]
+    encrypted: bool,
+    #[arg(long)]
+    workspace: Option<String>,
+}
+
+#[derive(Debug, Parser)]
+struct ManualImportCli {
+    path: PathBuf,
+    #[arg(long)]
+    workspace: Option<String>,
+    #[arg(long, default_value = "note", value_parser = parse_kind)]
+    kind: MemoryKind,
+    #[arg(long, value_enum, default_value_t = CliImportFormat::Auto)]
+    format: CliImportFormat,
+    #[arg(long, default_value_t = 1_800)]
+    chunk_chars: usize,
+    #[arg(long)]
+    no_recursive: bool,
+    #[arg(long)]
+    preview_redactions: bool,
     #[arg(long)]
     json: bool,
 }
@@ -882,6 +943,55 @@ struct ManualStartCli {
 }
 
 #[derive(Debug, Parser)]
+struct ManualAttachCli {
+    target: AttachTarget,
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+    #[arg(long, default_value_t = 7331)]
+    port: u16,
+    #[arg(long, default_value = "http://localhost:11434")]
+    upstream: String,
+    #[arg(long)]
+    start_proxy: bool,
+    #[arg(long)]
+    workspace: Option<String>,
+}
+
+#[derive(Debug, Parser)]
+struct ManualProxyCli {
+    #[arg(long, default_value = "127.0.0.1:7332")]
+    listen: String,
+    #[arg(long, default_value = "http://localhost:11434")]
+    upstream: String,
+    #[arg(long)]
+    workspace: Option<String>,
+    #[arg(long, default_value_t = 8)]
+    limit: usize,
+    #[arg(long, default_value_t = 1_200)]
+    tokens: usize,
+    #[arg(long)]
+    learn: bool,
+    #[arg(long)]
+    approval_required: bool,
+    #[arg(long, default_value_t = 0.58)]
+    min_confidence: f32,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualMcpCli {
+    #[arg(long)]
+    workspace: Option<String>,
+    #[arg(long)]
+    allow_writes: bool,
+    #[arg(long)]
+    no_redaction: bool,
+    #[arg(long)]
+    audit_log: Option<PathBuf>,
+}
+
+#[derive(Debug, Parser)]
 struct ManualDemoCli {
     #[arg(default_value = "seed", value_parser = ["seed", "reset"])]
     action: String,
@@ -909,6 +1019,110 @@ struct ManualAuditLogCli {
     json: bool,
     #[arg(long)]
     path: Option<PathBuf>,
+}
+
+#[derive(Debug, Parser)]
+struct ManualExtractCli {
+    path: Option<PathBuf>,
+    #[arg(long)]
+    workspace: Option<String>,
+    #[arg(long, value_parser = parse_kind)]
+    kind: Option<MemoryKind>,
+    #[arg(long)]
+    from_git: bool,
+    #[arg(long)]
+    since: Option<String>,
+    #[arg(long, default_value_t = 32)]
+    limit: usize,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualGitCli {
+    #[command(subcommand)]
+    command: GitCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum GitCommand {
+    Ingest {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long, default_value_t = 32)]
+        limit: usize,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Summary {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long, default_value_t = 12)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    Decisions {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long, default_value_t = 12)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    Bugs {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long, default_value_t = 12)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    Map {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long, value_enum, default_value_t = CliMapOutput::Markdown)]
+        output: CliMapOutput,
+        #[arg(long)]
+        save: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Parser)]
+struct ManualIgnoreCli {
+    #[command(subcommand)]
+    command: IgnoreCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum IgnoreCommand {
+    Init {
+        #[arg(long)]
+        root: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    Check {
+        path: PathBuf,
+        #[arg(long)]
+        root: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -990,6 +1204,42 @@ struct EngineOptions {
     model: Option<String>,
     dimensions: usize,
     api_key_env: String,
+}
+
+#[derive(Debug, Clone)]
+struct ProxyLearningConfig {
+    enabled: bool,
+    approval_required: bool,
+    min_confidence: f32,
+    dry_run: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExtractedCandidate {
+    content: String,
+    kind: MemoryKind,
+    confidence: f32,
+    reason: String,
+    tags: Vec<String>,
+    source_file: Option<String>,
+    source_commit: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RedactionPreviewHit {
+    path: String,
+    reason: String,
+    preview: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GitCommitRecord {
+    sha: String,
+    short_sha: String,
+    committed_at: String,
+    subject: String,
+    body: String,
+    files: Vec<String>,
 }
 
 impl From<&Cli> for EngineOptions {
@@ -1137,6 +1387,7 @@ fn main() -> Result<()> {
             format,
             chunk_chars,
             no_recursive,
+            preview_redactions,
             json,
         } => import_command(
             &engine,
@@ -1147,6 +1398,7 @@ fn main() -> Result<()> {
                 format: format.clone().into(),
                 chunk_chars: *chunk_chars,
                 recursive: !*no_recursive,
+                preview_redactions: *preview_redactions,
                 json_output: *json,
             },
         )?,
@@ -1226,6 +1478,10 @@ fn main() -> Result<()> {
             workspace,
             limit,
             tokens,
+            learn,
+            approval_required,
+            min_confidence,
+            dry_run,
         } => proxy_command(
             engine,
             listen,
@@ -1233,6 +1489,12 @@ fn main() -> Result<()> {
             workspace.as_ref(),
             *limit,
             *tokens,
+            ProxyLearningConfig {
+                enabled: *learn,
+                approval_required: *approval_required,
+                min_confidence: *min_confidence,
+                dry_run: *dry_run,
+            },
         )?,
         Command::Mcp {
             workspace,
@@ -1280,7 +1542,15 @@ fn print_extended_help() -> Result<()> {
         "  doctor                        Diagnose local setup, safety defaults, and runtime health"
     );
     println!("  audit-log                     Inspect recorded MCP agent access receipts");
+    println!(
+        "  extract [PATH]                Extract candidate memory from repo files or git history"
+    );
+    println!("  git ingest|summary|map        Git-aware project memory helpers");
+    println!("  ignore init|check             Manage .memoryignore safety rules");
     println!("  dev watch|morning|resume      Solo-dev workflow helpers");
+    println!(
+        "  dev explain-repo|next         Explain repo structure and recommend the next actions"
+    );
     println!("  map [PATH]                    Render evolution/decision/architecture maps");
     println!("  map why <topic>               Explain why a project decision or feature exists");
     println!("  map impact <topic>            Show what depends on a decision or component");
@@ -1298,6 +1568,13 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
     };
 
     match command.as_str() {
+        "init" => {
+            let args = ManualInitCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            init_command(&engine, args.encrypted, args.workspace)?;
+        }
         "edit" => {
             let args = ManualEditCli::parse_from(
                 std::iter::once(command.clone()).chain(rest.iter().cloned()),
@@ -1330,12 +1607,46 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
             let engine = build_engine_from_options(&options)?;
             restore_command(&engine, &args.id, args.json)?;
         }
+        "import" => {
+            let args = ManualImportCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            import_command(
+                &engine,
+                ImportCommandOptions {
+                    path: &args.path,
+                    workspace: args.workspace.as_ref(),
+                    kind: args.kind,
+                    format: args.format.into(),
+                    chunk_chars: args.chunk_chars,
+                    recursive: !args.no_recursive,
+                    preview_redactions: args.preview_redactions,
+                    json_output: args.json,
+                },
+            )?;
+        }
         "dev" => {
             let args = ManualDevCli::parse_from(
                 std::iter::once(command.clone()).chain(rest.iter().cloned()),
             );
             let engine = build_engine_from_options(&options)?;
             dev_command(&engine, &args.command)?;
+        }
+        "attach" => {
+            let args = ManualAttachCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            attach_command(
+                &engine,
+                &args.target,
+                &args.host,
+                args.port,
+                &args.upstream,
+                args.start_proxy,
+                args.workspace.as_ref(),
+            )?;
         }
         "map" => {
             let engine = build_engine_from_options(&options)?;
@@ -1447,6 +1758,26 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
         }
         "stop" => stop_command(&options)?,
         "status" => status_command(&options)?,
+        "proxy" => {
+            let args = ManualProxyCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            proxy_command(
+                engine,
+                &args.listen,
+                &args.upstream,
+                args.workspace.as_ref(),
+                args.limit,
+                args.tokens,
+                ProxyLearningConfig {
+                    enabled: args.learn,
+                    approval_required: args.approval_required,
+                    min_confidence: args.min_confidence,
+                    dry_run: args.dry_run,
+                },
+            )?;
+        }
         "demo" => {
             let args = ManualDemoCli::parse_from(
                 std::iter::once(command.clone()).chain(rest.iter().cloned()),
@@ -1482,6 +1813,50 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
             let engine = build_engine_from_options(&options)?;
             audit_log_command(&engine, args.limit, args.path.as_deref(), args.json)?;
         }
+        "mcp" => {
+            let args = ManualMcpCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            let mcp = resolve_mcp_runtime_config(
+                &engine,
+                args.workspace.as_ref(),
+                args.allow_writes,
+                args.no_redaction,
+                args.audit_log.as_ref(),
+            )?;
+            mcp_command(&engine, &mcp)?;
+        }
+        "extract" => {
+            let args = ManualExtractCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            extract_command(
+                &engine,
+                args.path.as_deref(),
+                args.workspace.as_ref(),
+                args.kind,
+                args.from_git,
+                args.since.as_deref(),
+                args.limit,
+                args.dry_run,
+                args.json,
+            )?;
+        }
+        "git" => {
+            let args = ManualGitCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            git_command(&engine, &args.command)?;
+        }
+        "ignore" => {
+            let args = ManualIgnoreCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            ignore_command(&args.command)?;
+        }
         _ => return Ok(false),
     }
 
@@ -1498,16 +1873,24 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         api_key_env: "MEMORY_CPP_OPENAI_API_KEY".to_string(),
     };
     let manual_commands = [
+        "init",
         "edit",
         "restore",
+        "import",
         "dev",
+        "attach",
         "map",
         "start",
         "stop",
         "status",
+        "proxy",
         "demo",
         "doctor",
         "audit-log",
+        "mcp",
+        "extract",
+        "git",
+        "ignore",
     ];
     let mut index = 1usize;
 
@@ -1930,11 +2313,38 @@ struct ImportCommandOptions<'a> {
     format: ImportFormat,
     chunk_chars: usize,
     recursive: bool,
+    preview_redactions: bool,
     json_output: bool,
 }
 
 fn import_command(engine: &MemoryEngine, options: ImportCommandOptions<'_>) -> Result<()> {
     let cli_options = options;
+    if cli_options.preview_redactions {
+        let hits = preview_redactions(cli_options.path, cli_options.recursive)?;
+        let report = json!({
+            "path": cli_options.path,
+            "hits": hits,
+        });
+        if cli_options.json_output {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else if hits.is_empty() {
+            println!("no likely secret material detected in the import set");
+        } else {
+            println!("detected possible secrets before import:");
+            for hit in hits {
+                println!(
+                    "  - {} [{}] {}",
+                    hit.path,
+                    hit.reason,
+                    hit.preview
+                        .unwrap_or_else(|| "redacted content".to_string())
+                );
+            }
+            println!("skipped by default; remove or redact them before import if needed.");
+        }
+        return Ok(());
+    }
+
     let options = ImportOptions {
         scope: required_workspace(engine, cli_options.workspace)?,
         kind: cli_options.kind,
@@ -1952,6 +2362,42 @@ fn import_command(engine: &MemoryEngine, options: ImportCommandOptions<'_>) -> R
         );
     }
     Ok(())
+}
+
+fn preview_redactions(path: &Path, recursive: bool) -> Result<Vec<RedactionPreviewHit>> {
+    let files = if path.is_file() {
+        vec![path.to_path_buf()]
+    } else {
+        collect_importable_files(path, recursive)?
+    };
+    let mut hits = Vec::new();
+    for file in files {
+        let raw = match fs::read_to_string(&file) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        for line in raw.lines() {
+            let trimmed = line.trim();
+            if let Some(reason) = detect_sensitive_reason(trimmed) {
+                let preview = trimmed
+                    .split_once(':')
+                    .map(|(prefix, _)| format!("{prefix}: [REDACTED]"))
+                    .or_else(|| {
+                        trimmed
+                            .split_once('=')
+                            .map(|(prefix, _)| format!("{prefix}=[REDACTED]"))
+                    })
+                    .or(Some("[REDACTED]".to_string()));
+                hits.push(RedactionPreviewHit {
+                    path: file.display().to_string(),
+                    reason: reason.to_string(),
+                    preview,
+                });
+                break;
+            }
+        }
+    }
+    Ok(hits)
 }
 
 fn watch_command(
@@ -2510,6 +2956,8 @@ fn attach_command(
                         &format!("{host}:7332"),
                         "--upstream",
                         upstream,
+                        "--learn",
+                        "--approval-required",
                     ])
                     .args(if let Some(workspace) = &scoped_workspace {
                         vec!["--workspace", workspace.as_str()]
@@ -2552,6 +3000,7 @@ fn proxy_command(
     workspace: Option<&String>,
     limit: usize,
     tokens: usize,
+    learning: ProxyLearningConfig,
 ) -> Result<()> {
     let server = Server::http(listen).map_err(|err| anyhow!(err.to_string()))?;
     println!("memory.cpp proxy listening on http://{listen}");
@@ -2559,6 +3008,22 @@ fn proxy_command(
         "forwarding chat completions to {}",
         upstream.trim_end_matches('/')
     );
+    if learning.enabled {
+        println!(
+            "proxy learning: enabled (min_confidence={:.2}, mode={})",
+            learning.min_confidence,
+            if learning.approval_required {
+                "approval-required"
+            } else {
+                "auto-store when safe"
+            }
+        );
+        if learning.dry_run {
+            println!("proxy learning is running in dry-run mode");
+        }
+    } else {
+        println!("proxy learning: disabled (use --learn to capture candidate memory)");
+    }
 
     let scope = workspace
         .cloned()
@@ -2566,7 +3031,9 @@ fn proxy_command(
         .unwrap_or_else(|| "default".to_string());
 
     for request in server.incoming_requests() {
-        if let Err(err) = handle_proxy_request(&engine, request, upstream, &scope, limit, tokens) {
+        if let Err(err) =
+            handle_proxy_request(&engine, request, upstream, &scope, limit, tokens, &learning)
+        {
             eprintln!("proxy error: {err:#}");
         }
     }
@@ -2694,6 +3161,16 @@ fn dev_command(engine: &MemoryEngine, command: &DevCommand) -> Result<()> {
             tokens,
             json,
         } => dev_resume_command(engine, query, workspace.as_ref(), *limit, *tokens, *json),
+        DevCommand::ExplainRepo {
+            path,
+            workspace,
+            json,
+        } => dev_explain_repo_command(engine, path.as_deref(), workspace.as_ref(), *json),
+        DevCommand::Next {
+            workspace,
+            limit,
+            json,
+        } => dev_next_command(engine, workspace.as_ref(), *limit, *json),
     }
 }
 
@@ -2890,6 +3367,871 @@ fn dev_resume_command(
     Ok(())
 }
 
+fn dev_explain_repo_command(
+    engine: &MemoryEngine,
+    path: Option<&Path>,
+    workspace: Option<&String>,
+    json_output: bool,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let requested_path = path.map(Path::to_path_buf).unwrap_or(env::current_dir()?);
+    let repo_root = resolve_repo_root(&requested_path).unwrap_or(requested_path.clone());
+    let outline = collect_repo_outline(&repo_root)?;
+    let recent_memories = engine.list_recent(Some(&scope), 18)?;
+    let recent_decisions = recent_memories
+        .iter()
+        .filter(|memory| matches!(memory.kind, MemoryKind::Decision | MemoryKind::Workflow))
+        .take(6)
+        .cloned()
+        .collect::<Vec<_>>();
+    let recent_bugs = recent_memories
+        .iter()
+        .filter(|memory| {
+            matches!(memory.kind, MemoryKind::Bug)
+                || memory.summary.to_ascii_lowercase().contains("fix")
+        })
+        .take(6)
+        .cloned()
+        .collect::<Vec<_>>();
+    let recent_commits = git_commit_records(&repo_root, Some("14d"), 5).unwrap_or_default();
+    let report = json!({
+        "workspace": scope,
+        "path": requested_path,
+        "repo_root": repo_root,
+        "outline": outline,
+        "recent_decisions": recent_decisions,
+        "recent_bugs_and_fixes": recent_bugs,
+        "recent_commits": recent_commits,
+    });
+
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "repo explanation for {}",
+            report["repo_root"].as_str().unwrap_or(".")
+        );
+        println!(
+            "workspace: {}",
+            report["workspace"].as_str().unwrap_or("default")
+        );
+        println!("shape:");
+        for entry in report["outline"].as_array().cloned().unwrap_or_default() {
+            println!("  - {}", entry.as_str().unwrap_or("item"));
+        }
+        println!("recent decisions:");
+        let decisions = report["recent_decisions"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if decisions.is_empty() {
+            println!("  none captured yet");
+        } else {
+            for item in decisions {
+                println!("  - {}", item["summary"].as_str().unwrap_or("decision"));
+            }
+        }
+        println!("recent bugs/fixes:");
+        let bugs = report["recent_bugs_and_fixes"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if bugs.is_empty() {
+            println!("  none captured yet");
+        } else {
+            for item in bugs {
+                println!("  - {}", item["summary"].as_str().unwrap_or("bug/fix"));
+            }
+        }
+        if let Some(commits) = report["recent_commits"].as_array() {
+            if !commits.is_empty() {
+                println!("recent git activity:");
+                for commit in commits {
+                    println!(
+                        "  - {} {}",
+                        commit["short_sha"].as_str().unwrap_or("commit"),
+                        commit["subject"].as_str().unwrap_or("")
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn dev_next_command(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    limit: usize,
+    json_output: bool,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let inbox = engine.inbox(Some(&scope), Some("pending"))?;
+    let conflicts = engine.conflicts(Some(&scope), limit.max(5))?;
+    let recent = engine.list_recent(Some(&scope), limit.max(8))?;
+    let mut suggestions = Vec::new();
+
+    if let Some(item) = inbox.first() {
+        suggestions.push(format!(
+            "Review pending inbox items starting with: {}",
+            item.reason
+        ));
+    }
+    if let Some(conflict) = conflicts.first() {
+        suggestions.push(format!("Resolve memory conflict: {}", conflict.reason));
+    }
+    if let Some(memory) = recent.iter().find(|memory| {
+        matches!(
+            memory.kind,
+            MemoryKind::Task | MemoryKind::Decision | MemoryKind::Workflow
+        )
+    }) {
+        suggestions.push(format!(
+            "Continue the latest tracked thread: {}",
+            memory.summary
+        ));
+    }
+    if let Some(memory) = recent.iter().find(|memory| {
+        matches!(memory.kind, MemoryKind::Bug)
+            || memory.summary.to_ascii_lowercase().contains("fix")
+    }) {
+        suggestions.push(format!(
+            "Verify the latest bug/fix memory: {}",
+            memory.summary
+        ));
+    }
+    if resolve_repo_root(&env::current_dir()?).is_some() {
+        suggestions.push("Refresh repo history with `memory git ingest --since 7d`.".to_string());
+    }
+    if suggestions.is_empty() {
+        suggestions.push(
+            "Run `memory dev morning` and seed or import a few project memories to build momentum."
+                .to_string(),
+        );
+    }
+    suggestions.truncate(limit.max(1));
+
+    let report = json!({
+        "workspace": scope,
+        "suggestions": suggestions,
+        "pending_inbox": inbox.len(),
+        "conflicts": conflicts.len(),
+    });
+
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "recommended next tasks for {}",
+            report["workspace"].as_str().unwrap_or("default")
+        );
+        for (index, suggestion) in report["suggestions"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
+            println!(
+                "{}. {}",
+                index + 1,
+                suggestion.as_str().unwrap_or("review project memory")
+            );
+        }
+        println!(
+            "signals: {} pending inbox item(s), {} conflict(s)",
+            report["pending_inbox"].as_u64().unwrap_or(0),
+            report["conflicts"].as_u64().unwrap_or(0)
+        );
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn extract_command(
+    engine: &MemoryEngine,
+    path: Option<&Path>,
+    workspace: Option<&String>,
+    kind: Option<MemoryKind>,
+    from_git: bool,
+    since: Option<&str>,
+    limit: usize,
+    dry_run: bool,
+    json_output: bool,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let source_path = path.map(Path::to_path_buf).unwrap_or(env::current_dir()?);
+    let candidates = if from_git {
+        extract_candidates_from_git(&source_path, kind, since, limit)?
+    } else {
+        extract_candidates_from_path(&source_path, kind, limit)?
+    };
+
+    let mut stored = 0usize;
+    let mut queued = 0usize;
+    if !dry_run {
+        for candidate in &candidates {
+            let memory = extracted_candidate_to_memory(candidate, &scope, true);
+            if engine
+                .remember_candidate(memory, &candidate.reason)?
+                .is_some()
+            {
+                stored += 1;
+            } else {
+                queued += 1;
+            }
+        }
+    }
+
+    let report = json!({
+        "workspace": scope,
+        "source": source_path,
+        "mode": if from_git { "git" } else { "files" },
+        "dry_run": dry_run,
+        "stored": stored,
+        "queued": queued,
+        "candidates": candidates,
+    });
+
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "extracted {} candidate memory item(s) from {}",
+            report["candidates"].as_array().map(Vec::len).unwrap_or(0),
+            report["source"].as_str().unwrap_or(".")
+        );
+        if dry_run {
+            println!("dry run only, nothing was stored");
+        } else {
+            println!("stored immediately: {stored} | queued for review: {queued}");
+        }
+        for candidate in report["candidates"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .take(limit.min(8))
+        {
+            println!(
+                "  - [{} {:.2}] {}",
+                candidate["kind"].as_str().unwrap_or("note"),
+                candidate["confidence"].as_f64().unwrap_or(0.0),
+                candidate["content"].as_str().unwrap_or("candidate")
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn git_command(engine: &MemoryEngine, command: &GitCommand) -> Result<()> {
+    let cwd = env::current_dir()?;
+    let Some(repo_root) = resolve_repo_root(&cwd) else {
+        println!("no git repository detected from {}", cwd.display());
+        return Ok(());
+    };
+
+    match command {
+        GitCommand::Ingest {
+            workspace,
+            since,
+            limit,
+            dry_run,
+            json,
+        } => {
+            let scope = required_workspace(engine, workspace.as_ref())?;
+            let candidates =
+                extract_candidates_from_git(&repo_root, None, since.as_deref(), *limit)?;
+            let mut stored = 0usize;
+            let mut queued = 0usize;
+            if !*dry_run {
+                for candidate in &candidates {
+                    let memory = extracted_candidate_to_memory(candidate, &scope, false);
+                    if engine
+                        .remember_candidate(memory, &candidate.reason)?
+                        .is_some()
+                    {
+                        stored += 1;
+                    } else {
+                        queued += 1;
+                    }
+                }
+            }
+            let report = json!({
+                "repo_root": repo_root,
+                "workspace": scope,
+                "dry_run": dry_run,
+                "stored": stored,
+                "queued": queued,
+                "candidates": candidates,
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "git ingest found {} candidate memory item(s)",
+                    report["candidates"].as_array().map(Vec::len).unwrap_or(0)
+                );
+                if *dry_run {
+                    println!("dry run only, nothing was stored");
+                } else {
+                    println!("stored immediately: {stored} | queued for review: {queued}");
+                }
+            }
+        }
+        GitCommand::Summary {
+            since, limit, json, ..
+        } => {
+            let commits = git_commit_records(&repo_root, since.as_deref(), *limit)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&commits)?);
+            } else if commits.is_empty() {
+                println!("no commits matched the requested window");
+            } else {
+                println!("recent git summary for {}", repo_root.display());
+                for commit in commits {
+                    println!("  - {} {}", commit.short_sha, commit.subject);
+                }
+            }
+        }
+        GitCommand::Decisions {
+            since, limit, json, ..
+        } => {
+            let candidates = extract_candidates_from_git(
+                &repo_root,
+                Some(MemoryKind::Decision),
+                since.as_deref(),
+                *limit,
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&candidates)?);
+            } else if candidates.is_empty() {
+                println!("no decision-flavored git memories detected");
+            } else {
+                for candidate in candidates {
+                    println!(
+                        "  - [{} {:.2}] {}",
+                        candidate.kind, candidate.confidence, candidate.content
+                    );
+                }
+            }
+        }
+        GitCommand::Bugs {
+            since, limit, json, ..
+        } => {
+            let candidates = extract_candidates_from_git(
+                &repo_root,
+                Some(MemoryKind::Bug),
+                since.as_deref(),
+                *limit,
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&candidates)?);
+            } else if candidates.is_empty() {
+                println!("no bug/fix git memories detected");
+            } else {
+                for candidate in candidates {
+                    println!(
+                        "  - [{} {:.2}] {}",
+                        candidate.kind, candidate.confidence, candidate.content
+                    );
+                }
+            }
+        }
+        GitCommand::Map {
+            workspace,
+            output,
+            save,
+            json,
+        } => {
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "repo_root": repo_root,
+                        "workspace": workspace,
+                        "type": "evolution",
+                        "output": format!("{output:?}").to_ascii_lowercase(),
+                        "save": save,
+                    }))?
+                );
+            } else {
+                map_command(
+                    engine,
+                    Some(&repo_root),
+                    None,
+                    workspace.as_ref(),
+                    CliMapType::Evolution,
+                    output.clone(),
+                    None,
+                    None,
+                    true,
+                    false,
+                    None,
+                    None,
+                    None,
+                    save.as_deref(),
+                )?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn ignore_command(command: &IgnoreCommand) -> Result<()> {
+    match command {
+        IgnoreCommand::Init { root, force } => {
+            let root = root.clone().unwrap_or(env::current_dir()?);
+            let path = root.join(".memoryignore");
+            if path.exists() && !*force {
+                return Err(anyhow!(
+                    "{} already exists; use --force to overwrite it",
+                    path.display()
+                ));
+            }
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(&path, DEFAULT_MEMORYIGNORE)?;
+            println!("wrote {}", path.display());
+        }
+        IgnoreCommand::Check { path, root, json } => {
+            let root = root.clone().unwrap_or(env::current_dir()?);
+            let target = if path.is_absolute() {
+                path.clone()
+            } else {
+                root.join(path)
+            };
+            let ignored = check_ignored_path(&root, &target)?;
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "root": root,
+                        "path": target,
+                        "ignored": ignored,
+                    }))?
+                );
+            } else {
+                println!(
+                    "{} -> {}",
+                    target.display(),
+                    if ignored { "ignored" } else { "included" }
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn collect_repo_outline(root: &Path) -> Result<Vec<String>> {
+    let mut entries = fs::read_dir(root)?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') && name != ".memory.cpp" {
+                return None;
+            }
+            let suffix = if entry.path().is_dir() { "/" } else { "" };
+            Some(format!("{name}{suffix}"))
+        })
+        .collect::<Vec<_>>();
+    entries.sort();
+    entries.truncate(10);
+
+    for focus in ["crates", "docs"] {
+        let dir = root.join(focus);
+        if !dir.is_dir() {
+            continue;
+        }
+        let mut children = fs::read_dir(&dir)?
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') {
+                    return None;
+                }
+                Some(format!("{focus}/{name}"))
+            })
+            .collect::<Vec<_>>();
+        children.sort();
+        children.truncate(6);
+        entries.extend(children);
+    }
+
+    entries.truncate(18);
+    Ok(entries)
+}
+
+fn resolve_repo_root(path: &Path) -> Option<PathBuf> {
+    let workdir = if path.is_file() {
+        path.parent().unwrap_or_else(|| Path::new("."))
+    } else {
+        path
+    };
+    git_repo_root(workdir)
+}
+
+fn extract_candidates_from_path(
+    path: &Path,
+    kind_hint: Option<MemoryKind>,
+    limit: usize,
+) -> Result<Vec<ExtractedCandidate>> {
+    let files = if path.is_file() {
+        vec![path.to_path_buf()]
+    } else {
+        collect_importable_files(path, true)?
+    };
+    let mut files = files;
+    files.sort();
+
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for file in files.into_iter().take(limit.max(8) * 4) {
+        let raw = match fs::read_to_string(&file) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        for line in extract_candidate_lines(&file, &raw) {
+            let Some(candidate) = build_extracted_candidate(
+                &line,
+                kind_hint,
+                Some(file.to_string_lossy().to_string()),
+                None,
+                "repo extraction".to_string(),
+            ) else {
+                continue;
+            };
+            let key = candidate.content.to_ascii_lowercase();
+            if seen.insert(key) {
+                out.push(candidate);
+            }
+            if out.len() >= limit {
+                return Ok(out);
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+fn extract_candidates_from_git(
+    path: &Path,
+    kind_hint: Option<MemoryKind>,
+    since: Option<&str>,
+    limit: usize,
+) -> Result<Vec<ExtractedCandidate>> {
+    let Some(repo_root) = resolve_repo_root(path) else {
+        return Ok(Vec::new());
+    };
+    let commits = git_commit_records(&repo_root, since, limit.max(8))?;
+    let mut out = Vec::new();
+    for commit in commits {
+        let mut content = commit.subject.trim().to_string();
+        if !commit.body.trim().is_empty() {
+            let body = commit
+                .body
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or_default()
+                .trim();
+            if !body.is_empty() {
+                content = format!("{content}. {body}");
+            }
+        }
+        let Some(candidate) = build_extracted_candidate(
+            &content,
+            kind_hint,
+            commit.files.first().cloned(),
+            Some(commit.sha.clone()),
+            format!("git commit {}", commit.short_sha),
+        ) else {
+            continue;
+        };
+        out.push(candidate);
+        if out.len() >= limit {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+fn extract_candidate_lines(path: &Path, raw: &str) -> Vec<String> {
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .unwrap_or_default();
+    let treat_as_source = matches!(
+        extension.as_str(),
+        "rs" | "py" | "ts" | "tsx" | "js" | "jsx" | "c" | "cpp" | "h" | "hpp"
+    );
+
+    raw.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with("```") {
+                return None;
+            }
+            if treat_as_source
+                && !trimmed.starts_with("//")
+                && !trimmed.starts_with('#')
+                && !trimmed.starts_with("/*")
+                && !trimmed.starts_with('*')
+                && !trimmed.contains("TODO")
+                && !trimmed.contains("FIXME")
+            {
+                return None;
+            }
+            let normalized = sanitize_candidate_text(trimmed);
+            if normalized.len() < 24 {
+                None
+            } else {
+                Some(normalized)
+            }
+        })
+        .collect()
+}
+
+fn sanitize_candidate_text(value: &str) -> String {
+    value
+        .trim()
+        .trim_start_matches('#')
+        .trim_start_matches('/')
+        .trim_start_matches('*')
+        .trim_start_matches('-')
+        .trim_start_matches(':')
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn build_extracted_candidate(
+    content: &str,
+    kind_hint: Option<MemoryKind>,
+    source_file: Option<String>,
+    source_commit: Option<String>,
+    reason: String,
+) -> Option<ExtractedCandidate> {
+    let content = sanitize_candidate_text(content);
+    if content.len() < 24 || content.len() > 320 || detect_sensitive_reason(&content).is_some() {
+        return None;
+    }
+
+    let lower = content.to_ascii_lowercase();
+    let (mut kind, mut confidence, mut tags): (MemoryKind, f32, Vec<String>) = if lower
+        .contains("todo")
+        || lower.contains("fixme")
+        || lower.starts_with("next ")
+        || lower.starts_with("next:")
+    {
+        (MemoryKind::Task, 0.84, vec!["task".to_string()])
+    } else if [
+        "bug",
+        "fix",
+        "regression",
+        "timeout",
+        "crash",
+        "error",
+        "failure",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+    {
+        (MemoryKind::Bug, 0.82, vec!["bug".to_string()])
+    } else if [
+        "decision",
+        "because",
+        "chosen",
+        "default",
+        "local-first",
+        "read-only",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+    {
+        (MemoryKind::Decision, 0.79, vec!["decision".to_string()])
+    } else if ["prefer", "always", "never", "should"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        (MemoryKind::Preference, 0.76, vec!["preference".to_string()])
+    } else if [
+        "workflow", "run ", "use ", "attach", "proxy", "watch", "command",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+    {
+        (MemoryKind::Workflow, 0.72, vec!["workflow".to_string()])
+    } else if ["roadmap", "milestone", "release"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        (MemoryKind::Fact, 0.68, vec!["roadmap".to_string()])
+    } else {
+        return None;
+    };
+
+    if let Some(expected) = kind_hint {
+        if expected != kind {
+            if expected == MemoryKind::Decision
+                && matches!(
+                    kind,
+                    MemoryKind::Preference | MemoryKind::Workflow | MemoryKind::Fact
+                )
+            {
+                kind = MemoryKind::Decision;
+                confidence = (confidence - 0.06f32).clamp(0.55f32, 1.0f32);
+            } else {
+                return None;
+            }
+        }
+    }
+
+    if source_commit.is_some() {
+        tags.push("git".to_string());
+    } else if source_file.is_some() {
+        tags.push("extract".to_string());
+    }
+    tags.sort();
+    tags.dedup();
+
+    Some(ExtractedCandidate {
+        content,
+        kind,
+        confidence,
+        reason,
+        tags,
+        source_file,
+        source_commit,
+    })
+}
+
+fn extracted_candidate_to_memory(
+    candidate: &ExtractedCandidate,
+    workspace: &str,
+    force_pending_review: bool,
+) -> NewMemory {
+    let status = if force_pending_review || candidate.confidence < 0.8 {
+        MemoryStatus::PendingReview
+    } else {
+        MemoryStatus::Active
+    };
+    let importance = match candidate.kind {
+        MemoryKind::Decision | MemoryKind::Bug | MemoryKind::Workflow => 0.78,
+        MemoryKind::Task => 0.74,
+        MemoryKind::Preference => 0.7,
+        _ => 0.62,
+    };
+    NewMemory::new(candidate.content.clone())
+        .scope(workspace.to_string())
+        .kind(candidate.kind.as_str())
+        .importance(importance)
+        .confidence(candidate.confidence)
+        .tags(candidate.tags.clone())
+        .status(status)
+        .source(MemorySource {
+            source_type: Some(if candidate.source_commit.is_some() {
+                "git_extract".to_string()
+            } else {
+                "repo_extract".to_string()
+            }),
+            source_app: Some("memory.cpp".to_string()),
+            source: Some(candidate.reason.clone()),
+            source_file: candidate.source_file.clone(),
+            source_line: None,
+            source_commit: candidate.source_commit.clone(),
+            source_conversation_id: None,
+            source_message_id: None,
+            created_by: Some("extract".to_string()),
+            reliability: Some(candidate.confidence),
+        })
+}
+
+fn git_commit_records(
+    root: &Path,
+    since: Option<&str>,
+    limit: usize,
+) -> Result<Vec<GitCommitRecord>> {
+    let mut command = ProcessCommand::new("git");
+    command.current_dir(root).args([
+        "log",
+        "--name-only",
+        "--pretty=format:%x1e%H%x1f%cI%x1f%s%x1f%b",
+        &format!("-n{}", limit.max(1)),
+    ]);
+    if let Some(since) = since {
+        command.arg(format!("--since={}", normalize_since_arg(since)));
+    }
+    let output = command.output().context("failed to run git log")?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "git log failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let mut commits = Vec::new();
+    for chunk in raw.split('\u{1e}') {
+        let chunk = chunk.trim();
+        if chunk.is_empty() {
+            continue;
+        }
+        let mut lines = chunk.lines();
+        let Some(header) = lines.next() else {
+            continue;
+        };
+        let mut parts = header.split('\u{1f}');
+        let sha = parts.next().unwrap_or_default().trim().to_string();
+        if sha.is_empty() {
+            continue;
+        }
+        let committed_at = parts.next().unwrap_or_default().trim().to_string();
+        let subject = parts.next().unwrap_or_default().trim().to_string();
+        let body = parts.next().unwrap_or_default().trim().to_string();
+        let files = lines
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        commits.push(GitCommitRecord {
+            short_sha: sha.chars().take(7).collect(),
+            sha,
+            committed_at,
+            subject,
+            body,
+            files,
+        });
+    }
+    Ok(commits)
+}
+
+fn normalize_since_arg(value: &str) -> String {
+    let trimmed = value.trim();
+    if let Some(days) = trimmed.strip_suffix('d') {
+        if days.parse::<u64>().is_ok() {
+            return format!("{days} days ago");
+        }
+    }
+    if let Some(hours) = trimmed.strip_suffix('h') {
+        if hours.parse::<u64>().is_ok() {
+            return format!("{hours} hours ago");
+        }
+    }
+    if let Some(weeks) = trimmed.strip_suffix('w') {
+        if weeks.parse::<u64>().is_ok() {
+            return format!("{weeks} weeks ago");
+        }
+    }
+    trimmed.to_string()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn map_command(
     engine: &MemoryEngine,
@@ -2993,6 +4335,8 @@ fn start_command(
             limit.to_string(),
             "--tokens".to_string(),
             tokens.to_string(),
+            "--learn".to_string(),
+            "--approval-required".to_string(),
         ];
         if let Some(workspace) = workspace {
             args.push("--workspace".to_string());
@@ -4038,6 +5382,7 @@ fn handle_proxy_request(
     workspace: &str,
     limit: usize,
     tokens: usize,
+    learning: &ProxyLearningConfig,
 ) -> Result<()> {
     if request.method() == &Method::Options {
         return respond_raw(request, 204, String::new(), "application/json");
@@ -4080,12 +5425,12 @@ fn handle_proxy_request(
         Ok(response) => {
             let status = response.status();
             let text = response.into_string()?;
-            observe_proxy_response(engine, workspace, &query, &text)?;
+            observe_proxy_response(engine, workspace, &query, &text, learning)?;
             respond_raw(request, status, text, "application/json")
         }
         Err(ureq::Error::Status(status, response)) => {
             let text = response.into_string().unwrap_or_default();
-            observe_proxy_response(engine, workspace, &query, &text).ok();
+            observe_proxy_response(engine, workspace, &query, &text, learning).ok();
             respond_raw(request, status, text, "application/json")
         }
         Err(err) => respond_json(request, 502, json!({ "error": err.to_string() })),
@@ -4954,7 +6299,12 @@ fn observe_proxy_response(
     workspace: &str,
     query: &str,
     raw_response: &str,
+    learning: &ProxyLearningConfig,
 ) -> Result<()> {
+    if !learning.enabled {
+        return Ok(());
+    }
+
     let payload: Value = serde_json::from_str(raw_response).unwrap_or_else(|_| json!({}));
     let content = payload
         .get("choices")
@@ -4969,17 +6319,30 @@ fn observe_proxy_response(
         return Ok(());
     }
 
-    for candidate in proxy_candidates(content, workspace, query) {
+    for candidate in proxy_candidates(content, workspace, query, learning) {
+        if learning.dry_run {
+            eprintln!("proxy candidate: {}", serde_json::to_string(&candidate)?);
+            continue;
+        }
+
         let _ = engine.remember_candidate(candidate, "proxy-observed memory")?;
     }
     Ok(())
 }
 
-fn proxy_candidates(text: &str, workspace: &str, query: &str) -> Vec<NewMemory> {
+fn proxy_candidates(
+    text: &str,
+    workspace: &str,
+    query: &str,
+    learning: &ProxyLearningConfig,
+) -> Vec<NewMemory> {
     let mut candidates = Vec::new();
     for sentence in text.split_terminator(['.', '!', '?']) {
         let trimmed = sentence.trim();
         if trimmed.len() < 20 {
+            continue;
+        }
+        if detect_sensitive_reason(trimmed).is_some() {
             continue;
         }
         let lower = trimmed.to_ascii_lowercase();
@@ -4994,6 +6357,16 @@ fn proxy_candidates(text: &str, workspace: &str, query: &str) -> Vec<NewMemory> 
         .iter()
         .any(|needle| lower.contains(needle))
         {
+            let confidence = if lower.contains("decision") {
+                0.7
+            } else if lower.contains("prefer") {
+                0.68
+            } else {
+                0.62
+            };
+            if confidence < learning.min_confidence {
+                continue;
+            }
             candidates.push(
                 NewMemory::new(trimmed.to_string())
                     .scope(workspace.to_string())
@@ -5004,7 +6377,7 @@ fn proxy_candidates(text: &str, workspace: &str, query: &str) -> Vec<NewMemory> 
                     } else {
                         "fact"
                     })
-                    .confidence(0.58)
+                    .confidence(confidence)
                     .tag("proxy".to_string())
                     .source(MemorySource {
                         source_type: Some("proxy_response".to_string()),
@@ -5016,9 +6389,13 @@ fn proxy_candidates(text: &str, workspace: &str, query: &str) -> Vec<NewMemory> 
                         source_conversation_id: None,
                         source_message_id: None,
                         created_by: Some("proxy".to_string()),
-                        reliability: Some(0.58),
+                        reliability: Some(confidence),
                     })
-                    .status(MemoryStatus::PendingReview),
+                    .status(if learning.approval_required || confidence < 0.8 {
+                        MemoryStatus::PendingReview
+                    } else {
+                        MemoryStatus::Active
+                    }),
             );
         }
     }
@@ -5556,6 +6933,103 @@ mod tests {
     }
 
     #[test]
+    fn split_manual_args_detects_extract_command() {
+        let raw = vec![
+            "memory".to_string(),
+            "--embedder".to_string(),
+            "hash".to_string(),
+            "extract".to_string(),
+            ".".to_string(),
+            "--dry-run".to_string(),
+        ];
+        let parsed = split_manual_args(&raw).expect("split should succeed");
+        let (_, command, rest) = parsed.expect("manual command should be detected");
+        assert_eq!(command, "extract");
+        assert_eq!(rest, vec![".".to_string(), "--dry-run".to_string()]);
+    }
+
+    #[test]
+    fn split_manual_args_detects_init_command() {
+        let raw = vec![
+            "memory".to_string(),
+            "init".to_string(),
+            "--workspace".to_string(),
+            "demo".to_string(),
+        ];
+        let parsed = split_manual_args(&raw).expect("split should succeed");
+        let (_, command, rest) = parsed.expect("manual command should be detected");
+        assert_eq!(command, "init");
+        assert_eq!(rest, vec!["--workspace".to_string(), "demo".to_string()]);
+    }
+
+    #[test]
+    fn split_manual_args_detects_import_command() {
+        let raw = vec![
+            "memory".to_string(),
+            "import".to_string(),
+            ".".to_string(),
+            "--preview-redactions".to_string(),
+        ];
+        let parsed = split_manual_args(&raw).expect("split should succeed");
+        let (_, command, rest) = parsed.expect("manual command should be detected");
+        assert_eq!(command, "import");
+        assert_eq!(
+            rest,
+            vec![".".to_string(), "--preview-redactions".to_string()]
+        );
+    }
+
+    #[test]
+    fn split_manual_args_detects_git_command() {
+        let raw = vec![
+            "memory".to_string(),
+            "git".to_string(),
+            "summary".to_string(),
+            "--since".to_string(),
+            "7d".to_string(),
+        ];
+        let parsed = split_manual_args(&raw).expect("split should succeed");
+        let (_, command, rest) = parsed.expect("manual command should be detected");
+        assert_eq!(command, "git");
+        assert_eq!(
+            rest,
+            vec![
+                "summary".to_string(),
+                "--since".to_string(),
+                "7d".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn split_manual_args_detects_ignore_command() {
+        let raw = vec![
+            "memory".to_string(),
+            "ignore".to_string(),
+            "check".to_string(),
+            "README.md".to_string(),
+        ];
+        let parsed = split_manual_args(&raw).expect("split should succeed");
+        let (_, command, rest) = parsed.expect("manual command should be detected");
+        assert_eq!(command, "ignore");
+        assert_eq!(rest, vec!["check".to_string(), "README.md".to_string()]);
+    }
+
+    #[test]
+    fn split_manual_args_detects_mcp_command() {
+        let raw = vec![
+            "memory".to_string(),
+            "mcp".to_string(),
+            "--workspace".to_string(),
+            "demo".to_string(),
+        ];
+        let parsed = split_manual_args(&raw).expect("split should succeed");
+        let (_, command, rest) = parsed.expect("manual command should be detected");
+        assert_eq!(command, "mcp");
+        assert_eq!(rest, vec!["--workspace".to_string(), "demo".to_string()]);
+    }
+
+    #[test]
     fn resolve_map_type_prefers_shortcut_flags() {
         let map_type = resolve_map_type(
             CliMapType::Evolution,
@@ -5604,5 +7078,112 @@ mod tests {
         assert_eq!(parsed.action, "reset");
         assert_eq!(parsed.workspace.as_deref(), Some("demo"));
         assert!(parsed.json);
+    }
+
+    #[test]
+    fn manual_git_summary_parses_since_and_limit() {
+        let parsed =
+            ManualGitCli::try_parse_from(["git", "summary", "--since", "14d", "--limit", "6"])
+                .expect("parse should succeed");
+        match parsed.command {
+            GitCommand::Summary { since, limit, .. } => {
+                assert_eq!(since.as_deref(), Some("14d"));
+                assert_eq!(limit, 6);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn manual_ignore_check_parses_json_flag() {
+        let parsed = ManualIgnoreCli::try_parse_from(["ignore", "check", "README.md", "--json"])
+            .expect("parse should succeed");
+        match parsed.command {
+            IgnoreCommand::Check { path, json, .. } => {
+                assert_eq!(path, PathBuf::from("README.md"));
+                assert!(json);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn manual_dev_parses_explain_repo() {
+        let parsed = ManualDevCli::try_parse_from([
+            "dev",
+            "explain-repo",
+            ".",
+            "--workspace",
+            "demo",
+            "--json",
+        ])
+        .expect("parse should succeed");
+        match parsed.command {
+            DevCommand::ExplainRepo {
+                path,
+                workspace,
+                json,
+            } => {
+                assert_eq!(path.as_deref(), Some(Path::new(".")));
+                assert_eq!(workspace.as_deref(), Some("demo"));
+                assert!(json);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn manual_import_parses_preview_redactions() {
+        let parsed = ManualImportCli::try_parse_from([
+            "import",
+            ".",
+            "--workspace",
+            "demo",
+            "--preview-redactions",
+            "--json",
+        ])
+        .expect("parse should succeed");
+        assert_eq!(parsed.path, PathBuf::from("."));
+        assert_eq!(parsed.workspace.as_deref(), Some("demo"));
+        assert!(parsed.preview_redactions);
+        assert!(parsed.json);
+    }
+
+    #[test]
+    fn manual_proxy_parses_learning_flags() {
+        let parsed = ManualProxyCli::try_parse_from([
+            "proxy",
+            "--learn",
+            "--approval-required",
+            "--min-confidence",
+            "0.7",
+        ])
+        .expect("parse should succeed");
+        assert!(parsed.learn);
+        assert!(parsed.approval_required);
+        assert!((parsed.min_confidence - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn normalize_since_arg_expands_shortcuts() {
+        assert_eq!(normalize_since_arg("7d"), "7 days ago");
+        assert_eq!(normalize_since_arg("12h"), "12 hours ago");
+        assert_eq!(normalize_since_arg("2w"), "2 weeks ago");
+        assert_eq!(normalize_since_arg("2026-05-01"), "2026-05-01");
+    }
+
+    #[test]
+    fn build_extracted_candidate_classifies_decisions() {
+        let candidate = build_extracted_candidate(
+            "Use SQLite as the default local-first storage engine because portability matters.",
+            Some(MemoryKind::Decision),
+            Some("README.md".to_string()),
+            None,
+            "repo extraction".to_string(),
+        )
+        .expect("candidate should be extracted");
+        assert!(matches!(candidate.kind, MemoryKind::Decision));
+        assert!(candidate.confidence >= 0.7);
+        assert!(candidate.tags.contains(&"decision".to_string()));
     }
 }

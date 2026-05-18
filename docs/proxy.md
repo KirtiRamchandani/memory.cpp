@@ -19,7 +19,7 @@ Flow:
 ## Run the proxy
 
 ```bash
-memory --db .memory.cpp/memory.db proxy --listen 127.0.0.1:7332 --upstream http://127.0.0.1:11434 --workspace demo
+memory --db .memory.cpp/memory.db proxy --listen 127.0.0.1:7332 --upstream http://127.0.0.1:11434 --workspace demo --learn --approval-required
 ```
 
 Then point any OpenAI-compatible client at:
@@ -28,6 +28,23 @@ Then point any OpenAI-compatible client at:
 http://127.0.0.1:7332/v1
 ```
 
+## Learning modes
+
+The proxy can now observe model replies and turn durable engineering facts into memory candidates.
+
+Safe launch mode:
+
+```bash
+memory --db .memory.cpp/memory.db proxy --listen 127.0.0.1:7332 --upstream http://127.0.0.1:11434 --workspace demo --learn --approval-required
+```
+
+Useful flags:
+
+- `--learn`: enable response observation and memory extraction
+- `--approval-required`: queue extracted memories for review instead of auto-storing them
+- `--min-confidence 0.70`: ignore weaker candidate extractions
+- `--dry-run`: print extracted candidates without storing anything
+
 ## Attach Ollama helper
 
 ```bash
@@ -35,6 +52,8 @@ memory --db .memory.cpp/memory.db attach ollama --workspace demo --start-proxy
 ```
 
 This writes a small local proxy config file and can start the proxy immediately.
+
+When `--start-proxy` is used, the helper starts the proxy in safe learning mode so chat-derived memories land in the review path first.
 
 ## Good launch demo
 

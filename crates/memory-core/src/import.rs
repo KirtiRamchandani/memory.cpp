@@ -8,6 +8,18 @@ use serde_json::{json, Value};
 
 use crate::{MemoryEngine, MemoryKind, NewMemory, Result};
 
+pub const DEFAULT_MEMORYIGNORE: &str = "\
+.env
+*.pem
+*.key
+secrets/
+private/
+node_modules/
+target/
+dist/
+build/
+";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImportFormat {
@@ -115,6 +127,11 @@ pub fn collect_importable_files(path: &Path, recursive: bool) -> Result<Vec<Path
     let rules = load_ignore_rules(&root)?;
     collect_dir(&root, path, recursive, &rules, &mut files)?;
     Ok(files)
+}
+
+pub fn check_ignored_path(root: &Path, path: &Path) -> Result<bool> {
+    let rules = load_ignore_rules(root)?;
+    Ok(is_ignored(root, path, &rules))
 }
 
 fn collect_dir(

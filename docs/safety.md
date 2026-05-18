@@ -43,6 +43,14 @@ target/
 
 Both `memory import` and `memory dev watch` respect `.memoryignore` and `.gitignore`.
 
+Useful commands:
+
+```bash
+memory ignore init
+memory ignore check README.md
+memory --db .memory.cpp/memory.db import . --workspace demo --preview-redactions
+```
+
 ## What is intentionally not claimed yet
 
 These are still important future layers:

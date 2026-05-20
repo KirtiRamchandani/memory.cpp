@@ -55,6 +55,8 @@ cargo run -p memory-cli -- --db $db watch status
 cargo run -p memory-cli -- --db $db attach cursor --dry-run
 cargo run -p memory-cli -- --db $db attach --print-config cursor
 cargo run -p memory-cli -- --db $db attach status
+cargo run -p memory-cli -- --db $db attach verify cursor --dry-run
+cargo run -p memory-cli -- --db $db attach export-config cursor
 cargo run -p memory-cli -- --db $db detach cursor --dry-run
 $extractPreview = ((cargo run -q -p memory-cli -- --db $db extract . --workspace smoke-demo --dry-run --limit 5 --json) | Out-String)
 if ($extractPreview -notmatch 'candidates') {
@@ -84,6 +86,16 @@ cargo run -p memory-cli -- --db $db show-map --workspace smoke-demo --save (Join
 cargo run -p memory-cli -- --db $db map status
 cargo run -p memory-cli -- --db $db map refresh
 cargo run -p memory-cli -- --db $db map export-context
+cargo run -p memory-cli -- --db $db share status --output (Join-Path $dbDir 'project-memory-summary.md')
+cargo run -p memory-cli -- --db $db share map --output (Join-Path $dbDir 'project-evolution-map.html')
+cargo run -p memory-cli -- --db $db docs generate --dry-run
+cargo run -p memory-cli -- --db $db pr summary --base main --output (Join-Path $dbDir 'pr-summary.md')
+cargo run -p memory-cli -- --db $db timeline week --output (Join-Path $dbDir 'repo-timeline.md')
+cargo run -p memory-cli -- --db $db rewind last-week --output (Join-Path $dbDir 'rewind.md')
+cargo run -p memory-cli -- --db $db changed --since "7 days ago" --output (Join-Path $dbDir 'changed.md')
+cargo run -p memory-cli -- --db $db handoff new-dev --output (Join-Path $dbDir 'handoff')
+cargo run -p memory-cli -- --db $db adoption status
+cargo run -p memory-cli -- --db $db release-check
 cargo run -p memory-cli -- --db $db open --print docs
 cargo run -p memory-cli -- --db $db doctor --workspace smoke-demo
 cargo run -p memory-cli -- --db $db fix

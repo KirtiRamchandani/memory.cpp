@@ -52,6 +52,8 @@ cargo run -p memory-cli -- --db "$DB" watch status
 cargo run -p memory-cli -- --db "$DB" attach cursor --dry-run
 cargo run -p memory-cli -- --db "$DB" attach --print-config cursor
 cargo run -p memory-cli -- --db "$DB" attach status
+cargo run -p memory-cli -- --db "$DB" attach verify cursor --dry-run
+cargo run -p memory-cli -- --db "$DB" attach export-config cursor
 cargo run -p memory-cli -- --db "$DB" detach cursor --dry-run
 EXTRACT_PREVIEW="$(cargo run -q -p memory-cli -- --db "$DB" extract . --workspace smoke-demo --dry-run --limit 5 --json)"
 case "$EXTRACT_PREVIEW" in
@@ -86,6 +88,16 @@ cargo run -p memory-cli -- --db "$DB" show-map --workspace smoke-demo --save "$D
 cargo run -p memory-cli -- --db "$DB" map status
 cargo run -p memory-cli -- --db "$DB" map refresh
 cargo run -p memory-cli -- --db "$DB" map export-context
+cargo run -p memory-cli -- --db "$DB" share status --output "$DB_DIR/project-memory-summary.md"
+cargo run -p memory-cli -- --db "$DB" share map --output "$DB_DIR/project-evolution-map.html"
+cargo run -p memory-cli -- --db "$DB" docs generate --dry-run
+cargo run -p memory-cli -- --db "$DB" pr summary --base main --output "$DB_DIR/pr-summary.md"
+cargo run -p memory-cli -- --db "$DB" timeline week --output "$DB_DIR/repo-timeline.md"
+cargo run -p memory-cli -- --db "$DB" rewind last-week --output "$DB_DIR/rewind.md"
+cargo run -p memory-cli -- --db "$DB" changed --since "7 days ago" --output "$DB_DIR/changed.md"
+cargo run -p memory-cli -- --db "$DB" handoff new-dev --output "$DB_DIR/handoff"
+cargo run -p memory-cli -- --db "$DB" adoption status
+cargo run -p memory-cli -- --db "$DB" release-check
 cargo run -p memory-cli -- --db "$DB" open --print docs
 cargo run -p memory-cli -- --db "$DB" doctor --workspace smoke-demo
 cargo run -p memory-cli -- --db "$DB" fix

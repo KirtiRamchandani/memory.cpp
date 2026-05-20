@@ -7,7 +7,8 @@ $required = @(
   'docs/maps.md','docs/inbox.md','docs/doctor.md','docs/privacy.md','docs/safety.md','docs/config.md',
   'docs/ci-memory.md','docs/watch.md','docs/examples.md','docs/troubleshooting.md',
   'docs/troubleshooting-install.md','docs/architecture.md','docs/roadmap.md','docs/faq.md',
-  'docs/changelog.md','docs/launch-checklist.md'
+  'docs/changelog.md','docs/launch-checklist.md','docs/share.md','docs/pr-workflow.md',
+  'docs/timeline.md','docs/handoff.md','docs/adoption.md'
 )
 foreach ($file in $required) { if (-not (Test-Path $file)) { throw "missing $file" } }
 Write-Host "Docs check passed ($($required.Count) files)."

@@ -181,3 +181,38 @@ memory audit-log --limit 20
 - Use `doctor` before sharing a demo or attaching agents.
 - Create `.memoryignore` before importing or watching a real repository.
 - Use `proxy --learn --approval-required` when you want passive learning without unattended direct writes.
+
+## Virality and adoption loop
+
+Shareable artifacts:
+
+```bash
+memory share status
+memory share map --output .memory.cpp/share/project-evolution-map.html
+memory share context --private-safe
+```
+
+Repo documentation:
+
+```bash
+memory docs generate --dry-run
+memory docs generate --apply
+```
+
+PR and handoff workflows:
+
+```bash
+memory pr summary --base main
+memory pr checklist --output .memory.cpp/share/pr-checklist.md
+memory handoff new-dev --output .memory.cpp/handoff
+```
+
+Repo time machine and local activation:
+
+```bash
+memory timeline week
+memory rewind last-week
+memory changed --since "7 days ago"
+memory adoption checklist
+memory release-check
+```

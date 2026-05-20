@@ -3061,6 +3061,24 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
                 attach_doctor_command(&engine)?;
             } else if rest.first().is_some_and(|value| value == "list") {
                 attach_list_command()?;
+            } else if rest.first().is_some_and(|value| value == "verify") {
+                attach_verify_command(
+                    &engine,
+                    first_positional_after_action(&rest),
+                    cli_flag(&rest, "--dry-run"),
+                )?;
+            } else if rest.first().is_some_and(|value| value == "repair") {
+                attach_repair_command(
+                    &engine,
+                    first_positional_after_action(&rest),
+                    cli_flag(&rest, "--dry-run"),
+                )?;
+            } else if rest.first().is_some_and(|value| value == "export-config") {
+                attach_export_config_command(&engine, first_positional_after_action(&rest))?;
+            } else if rest.first().is_some_and(|value| value == "backup-list") {
+                attach_backup_list_command()?;
+            } else if rest.first().is_some_and(|value| value == "restore-backup") {
+                attach_restore_backup_command(first_positional_after_action(&rest))?;
             } else {
                 let args = ManualAttachCli::parse_from(
                     std::iter::once(command.clone()).chain(rest.iter().cloned()),
@@ -3098,6 +3116,42 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
             );
             let engine = build_engine_from_options(&options)?;
             public_context_command(&engine, &args)?;
+        }
+        "share" => {
+            let engine = build_engine_from_options(&options)?;
+            share_command(&engine, &rest)?;
+        }
+        "docs" => {
+            let engine = build_engine_from_options(&options)?;
+            docs_command(&engine, &rest)?;
+        }
+        "pr" => {
+            let engine = build_engine_from_options(&options)?;
+            pr_command(&engine, &rest)?;
+        }
+        "timeline" => {
+            let engine = build_engine_from_options(&options)?;
+            public_timeline_command(&engine, &rest)?;
+        }
+        "rewind" => {
+            let engine = build_engine_from_options(&options)?;
+            rewind_command(&engine, &rest)?;
+        }
+        "changed" => {
+            let engine = build_engine_from_options(&options)?;
+            changed_command(&engine, &rest)?;
+        }
+        "handoff" => {
+            let engine = build_engine_from_options(&options)?;
+            handoff_command(&engine, &rest)?;
+        }
+        "adoption" => {
+            let engine = build_engine_from_options(&options)?;
+            adoption_command(&engine, &rest)?;
+        }
+        "release-check" => {
+            let engine = build_engine_from_options(&options)?;
+            release_check_command(&engine, &rest)?;
         }
         "map" => {
             let engine = build_engine_from_options(&options)?;
@@ -3408,6 +3462,15 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "detach",
         "watch",
         "context",
+        "share",
+        "docs",
+        "pr",
+        "timeline",
+        "rewind",
+        "changed",
+        "handoff",
+        "adoption",
+        "release-check",
         "map",
         "start",
         "stop",
@@ -7347,6 +7410,7 @@ fn newest_file(dirs: &[PathBuf], extension: &str) -> Option<String> {
     newest.map(|(_, path)| path.display().to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn attach_command(
     engine: &MemoryEngine,
     target: &AttachTarget,
@@ -9103,7 +9167,7 @@ fn public_context_command(engine: &MemoryEngine, args: &ManualContextCli) -> Res
             emit_or_save(&rendered, Some(&output))?;
         }
         ContextAction::Open => {
-            if let Some(path) = newest_file(&[context_dir.clone()], "md") {
+            if let Some(path) = newest_file(std::slice::from_ref(&context_dir), "md") {
                 println!("{path}");
                 let _ = open_with_os(&path);
             } else {
@@ -9112,7 +9176,7 @@ fn public_context_command(engine: &MemoryEngine, args: &ManualContextCli) -> Res
             }
         }
         ContextAction::Status => {
-            let latest = newest_file(&[context_dir.clone()], "md");
+            let latest = newest_file(std::slice::from_ref(&context_dir), "md");
             let report = json!({
                 "context_dir": context_dir,
                 "latest": latest,
@@ -9215,6 +9279,702 @@ fn context_pack_text(
     out.push_str("- Do not assume network or cloud sync is enabled.\n");
     out.push_str("- Do not store secrets; use `.memoryignore` and redaction previews.\n");
     Ok(out)
+}
+
+fn share_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest
+        .first()
+        .filter(|value| !value.starts_with("--"))
+        .map(String::as_str)
+        .unwrap_or("status");
+    let output = cli_flag_path(rest, "--output").unwrap_or_else(|| default_share_path(action));
+    let html = cli_flag(rest, "--html") || matches!(action, "map");
+    let no_brand = cli_flag(rest, "--no-brand");
+    let private_safe = true;
+    let rendered = if html {
+        render_share_html(engine, action, no_brand)?
+    } else {
+        render_share_markdown(engine, action, no_brand)?
+    };
+    write_public_artifact(&output, &rendered, private_safe)?;
+    println!("share artifact: {}", output.display());
+    println!("private safe: secrets are redacted before writing");
+    println!("next: attach this file to a README, PR, issue, or team chat");
+    Ok(())
+}
+
+fn docs_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest
+        .first()
+        .filter(|value| !value.starts_with("--"))
+        .map(String::as_str)
+        .unwrap_or("generate");
+    let apply = cli_flag(rest, "--apply");
+    let dry_run = cli_flag(rest, "--dry-run") || !apply;
+    let output_dir =
+        cli_flag_path(rest, "--output").unwrap_or_else(|| PathBuf::from("docs/memory"));
+    let docs = generated_memory_docs(engine)?;
+    if dry_run {
+        println!("memory docs {action} dry run");
+        println!("would write generated docs under {}", output_dir.display());
+        for (name, _) in &docs {
+            println!("  - {}/{}", output_dir.display(), name);
+        }
+        println!("apply with: memory docs generate --apply");
+        return Ok(());
+    }
+    fs::create_dir_all(&output_dir)?;
+    for (name, body) in docs {
+        let path = output_dir.join(name);
+        backup_if_exists(&path)?;
+        write_public_artifact(&path, &body, true)?;
+    }
+    println!("generated memory docs under {}", output_dir.display());
+    println!("next: git diff -- docs/memory");
+    Ok(())
+}
+
+fn pr_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest
+        .first()
+        .filter(|value| !value.starts_with("--"))
+        .map(String::as_str)
+        .unwrap_or("summary");
+    let base = cli_flag_value(rest, "--base").unwrap_or_else(|| "main".to_string());
+    let output = cli_flag_path(rest, "--output");
+    let rendered = render_pr_markdown(engine, action, &base)?;
+    if let Some(path) = output.as_deref() {
+        write_public_artifact(path, &rendered, true)?;
+        println!("PR artifact: {}", path.display());
+    } else {
+        println!("{rendered}");
+    }
+    if cli_flag(rest, "--copy") {
+        println!("clipboard copy is not automatic here; use --output and paste the file contents.");
+    }
+    Ok(())
+}
+
+fn public_timeline_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest
+        .first()
+        .filter(|value| !value.starts_with("--"))
+        .map(String::as_str)
+        .unwrap_or("week");
+    let output = cli_flag_path(rest, "--output");
+    let html = cli_flag(rest, "--html");
+    let rendered = render_timeline_markdown(engine, action, rest)?;
+    if let Some(path) = output.as_deref() {
+        let body = if html {
+            simple_html_page("Repo time machine", &rendered)
+        } else {
+            rendered
+        };
+        write_public_artifact(path, &body, true)?;
+        println!("timeline artifact: {}", path.display());
+    } else {
+        println!("{rendered}");
+    }
+    Ok(())
+}
+
+fn rewind_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest.first().map(String::as_str).unwrap_or("yesterday");
+    let output = cli_flag_path(rest, "--output");
+    let rendered = render_timeline_markdown(engine, &format!("rewind-{action}"), rest)?;
+    if let Some(path) = output.as_deref() {
+        write_public_artifact(path, &rendered, true)?;
+        println!("rewind artifact: {}", path.display());
+    } else {
+        println!("{rendered}");
+    }
+    Ok(())
+}
+
+fn changed_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let since = cli_flag_value(rest, "--since").unwrap_or_else(|| "7 days ago".to_string());
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let output = cli_flag_path(rest, "--output");
+    let mut out = String::new();
+    out.push_str("# What changed\n\n");
+    out.push_str(&format!("Since: `{since}`\n\n"));
+    if git_repo_root(&repo_root).is_some() {
+        match git_stdout(
+            &repo_root,
+            &["log", "--since", &since, "--oneline", "--max-count", "20"],
+        ) {
+            Ok(log) if !log.is_empty() => {
+                out.push_str("## Git commits\n");
+                for line in log.lines() {
+                    out.push_str(&format!("- {line}\n"));
+                }
+            }
+            _ => out.push_str("## Git commits\n- No matching commits found.\n"),
+        }
+    }
+    out.push_str("\n## Memory signals\n");
+    for line in recent_memory_lines(engine, 8)? {
+        out.push_str(&format!("- {line}\n"));
+    }
+    out.push_str("\n## What to do next\n- Run `memory dev next`.\n- Run `memory share status` for a shareable summary.\n");
+    if let Some(path) = output.as_deref() {
+        write_public_artifact(path, &out, true)?;
+        println!("changed artifact: {}", path.display());
+    } else {
+        println!("{out}");
+    }
+    Ok(())
+}
+
+fn handoff_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest
+        .first()
+        .filter(|value| !value.starts_with("--"))
+        .map(String::as_str)
+        .unwrap_or("new-dev");
+    let output_dir =
+        cli_flag_path(rest, "--output").unwrap_or_else(|| PathBuf::from(".memory.cpp/handoff"));
+    let private_safe = true;
+    if action == "import" {
+        println!("handoff import is local and manual in this release.");
+        println!("bundle folder: {}", output_dir.display());
+        println!("review the Markdown, then import useful facts with `memory remember`.");
+        return Ok(());
+    }
+    let markdown = render_handoff_markdown(engine, action)?;
+    fs::create_dir_all(&output_dir)?;
+    let md_path = output_dir.join(match action {
+        "reviewer" => "reviewer-handoff.md",
+        "ai-agent" => "ai-agent-handoff.md",
+        "maintainer" => "maintainer-handoff.md",
+        _ => "new-dev-handoff.md",
+    });
+    write_public_artifact(&md_path, &markdown, private_safe)?;
+    let json_path = output_dir.join("handoff-manifest.json");
+    write_public_artifact(
+        &json_path,
+        &serde_json::to_string_pretty(&json!({
+            "kind": action,
+            "private_safe": true,
+            "markdown": md_path,
+            "import": "memory handoff import --output .memory.cpp/handoff"
+        }))?,
+        true,
+    )?;
+    println!("handoff bundle: {}", output_dir.display());
+    println!(
+        "import guidance: memory handoff import --output {}",
+        output_dir.display()
+    );
+    Ok(())
+}
+
+fn adoption_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest
+        .first()
+        .filter(|value| !value.starts_with("--"))
+        .map(String::as_str)
+        .unwrap_or("status");
+    let report = adoption_report(engine)?;
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+    let score = report["score"].as_u64().unwrap_or(0);
+    println!("memory.cpp adoption {action}");
+    println!("score: {score}%");
+    if let Some(items) = report["checks"].as_array() {
+        for item in items {
+            println!(
+                "- [{}] {}",
+                if item["ok"].as_bool().unwrap_or(false) {
+                    "x"
+                } else {
+                    " "
+                },
+                item["label"].as_str().unwrap_or("check")
+            );
+        }
+    }
+    println!(
+        "next: {}",
+        report["next"]
+            .as_str()
+            .unwrap_or("memory setup --developer --yes")
+    );
+    Ok(())
+}
+
+fn release_check_command(_engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let report = release_check_report()?;
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+    println!("memory.cpp release check");
+    let mut failures = 0usize;
+    for check in report["checks"].as_array().cloned().unwrap_or_default() {
+        let ok = check["ok"].as_bool().unwrap_or(false);
+        if !ok {
+            failures += 1;
+        }
+        println!(
+            "- [{}] {}",
+            if ok { "x" } else { " " },
+            check["label"].as_str().unwrap_or("check")
+        );
+    }
+    if failures == 0 {
+        println!("release gate: ready for local release validation");
+    } else {
+        println!("release gate: {failures} item(s) need attention");
+    }
+    Ok(())
+}
+
+fn attach_verify_command(engine: &MemoryEngine, target: Option<&str>, dry_run: bool) -> Result<()> {
+    let target = target.unwrap_or("cursor");
+    let parsed = parse_attach_target_name(target)?;
+    let root = env::current_dir()?;
+    let path = attach_config_path(&root, &parsed)?;
+    println!("attach verify: {target}");
+    println!("config path: {}", path.display());
+    println!(
+        "status: {}",
+        if path.exists() {
+            "configured"
+        } else {
+            "not configured"
+        }
+    );
+    println!("MCP tools: read-only by default; write tools require approval.");
+    println!("test prompt: Use memory.cpp to summarize this repo's recent decisions and suggest the next command.");
+    if dry_run {
+        println!("dry run: no files changed");
+    }
+    let _ = engine.stats()?;
+    Ok(())
+}
+
+fn attach_repair_command(engine: &MemoryEngine, target: Option<&str>, dry_run: bool) -> Result<()> {
+    let target = target.unwrap_or("cursor");
+    attach_verify_command(engine, Some(target), dry_run)?;
+    println!("repair plan: run `memory attach {target} --dry-run`, then rerun with `--yes` if the config looks right.");
+    Ok(())
+}
+
+fn attach_export_config_command(engine: &MemoryEngine, target: Option<&str>) -> Result<()> {
+    let target = parse_attach_target_name(target.unwrap_or("cursor"))?;
+    let exe = env::current_exe().context("could not locate current memory executable")?;
+    let db = engine
+        .store_path()
+        .canonicalize()
+        .unwrap_or_else(|_| engine.store_path().to_path_buf());
+    let workspace = current_workspace_name(engine)?;
+    let config = if matches!(target, AttachTarget::Ollama) {
+        json!({
+            "base_url": "http://127.0.0.1:7332/v1",
+            "upstream": "http://localhost:11434",
+            "note": "Start explicitly with memory proxy; attach does not start services by default."
+        })
+    } else {
+        build_attach_config(&exe, &db, workspace.as_ref())
+    };
+    println!("{}", serde_json::to_string_pretty(&config)?);
+    Ok(())
+}
+
+fn attach_backup_list_command() -> Result<()> {
+    let root = env::current_dir()?;
+    println!("attach backups");
+    for dir in [
+        ".cursor",
+        ".claude",
+        ".vscode",
+        ".codex",
+        ".continue",
+        ".memory.cpp/attach",
+    ] {
+        let dir = root.join(dir);
+        if !dir.exists() {
+            continue;
+        }
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.to_string_lossy().contains(".bak") {
+                println!("- {}", path.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn attach_restore_backup_command(id: Option<&str>) -> Result<()> {
+    println!("attach restore-backup is intentionally manual in this release.");
+    println!("backup id/path: {}", id.unwrap_or("<missing>"));
+    println!("copy the backup over the matching config after reviewing it.");
+    Ok(())
+}
+
+fn parse_attach_target_name(value: &str) -> Result<AttachTarget> {
+    AttachTarget::from_str(value, true)
+        .map_err(|err| anyhow!("unknown attach target '{value}': {err}"))
+}
+
+fn cli_flag(rest: &[String], flag: &str) -> bool {
+    rest.iter().any(|item| item == flag)
+}
+
+fn cli_flag_value(rest: &[String], flag: &str) -> Option<String> {
+    rest.windows(2)
+        .find(|window| window.first().is_some_and(|item| item == flag))
+        .and_then(|window| window.get(1).cloned())
+}
+
+fn cli_flag_path(rest: &[String], flag: &str) -> Option<PathBuf> {
+    cli_flag_value(rest, flag).map(PathBuf::from)
+}
+
+fn first_positional_after_action(rest: &[String]) -> Option<&str> {
+    rest.iter()
+        .skip(1)
+        .find(|value| !value.starts_with("--"))
+        .map(String::as_str)
+}
+
+fn default_share_path(action: &str) -> PathBuf {
+    let base = PathBuf::from(".memory.cpp/share");
+    match action {
+        "map" => base.join("project-evolution-map.html"),
+        "context" => base.join("ai-context-pack.md"),
+        "morning" => base.join("dev-morning.md"),
+        "pr" => base.join("pr-summary.md"),
+        "onboarding" => base.join("onboarding-brief.md"),
+        "release" => base.join("release-notes.md"),
+        _ => base.join("project-memory-summary.md"),
+    }
+}
+
+fn write_public_artifact(path: &Path, body: &str, private_safe: bool) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let rendered = if private_safe {
+        body.lines().map(redact_line).collect::<Vec<_>>().join("\n") + "\n"
+    } else {
+        body.to_string()
+    };
+    fs::write(path, rendered)?;
+    Ok(())
+}
+
+fn backup_if_exists(path: &Path) -> Result<()> {
+    if path.exists() {
+        let backup = path.with_extension(format!("{}.bak", Utc::now().format("%Y%m%d%H%M%S")));
+        fs::copy(path, backup)?;
+    }
+    Ok(())
+}
+
+fn render_share_markdown(engine: &MemoryEngine, action: &str, no_brand: bool) -> Result<String> {
+    let scope = current_workspace_name(engine)?.unwrap_or_else(|| "default".to_string());
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let status = repo_status_report(&repo_root);
+    let stats = engine.stats()?;
+    let mut out = String::new();
+    let title = match action {
+        "context" => "AI context pack",
+        "morning" => "Developer morning brief",
+        "pr" => "PR summary",
+        "onboarding" => "Onboarding brief",
+        "release" => "Release notes",
+        _ => "Project memory summary",
+    };
+    out.push_str(&format!("# {title}\n\n"));
+    out.push_str(
+        "Local-first note: this artifact was generated from local repo memory with redaction.\n\n",
+    );
+    out.push_str("## Repo snapshot\n");
+    out.push_str(&format!(
+        "- Workspace: `{scope}`\n- Branch: `{}`\n- Dirty files: {}\n- Memories: {}\n\n",
+        status["branch"].as_str().unwrap_or("unknown"),
+        status["dirty_count"].as_u64().unwrap_or(0),
+        stats.memories
+    ));
+    out.push_str("## What happened recently\n");
+    for line in recent_memory_lines(engine, 8)? {
+        out.push_str(&format!("- {line}\n"));
+    }
+    out.push_str("\n## What to do next\n");
+    out.push_str("- Run `memory dev morning`.\n- Run `memory context write --for cursor`.\n- Run `memory map --type evolution --output html`.\n");
+    if !no_brand {
+        out.push_str("\n---\nGenerated by memory.cpp. Your repo remembers.\n");
+    }
+    Ok(out)
+}
+
+fn render_share_html(engine: &MemoryEngine, action: &str, no_brand: bool) -> Result<String> {
+    let markdown = render_share_markdown(engine, action, no_brand)?;
+    Ok(simple_html_page("Your repo remembers", &markdown))
+}
+
+fn simple_html_page(title: &str, markdown: &str) -> String {
+    let escaped = markdown
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{title}</title><style>body{{margin:0;background:#0d1117;color:#e6edf3;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}}main{{max-width:960px;margin:0 auto;padding:40px}}pre{{white-space:pre-wrap;background:#111827;border:1px solid #2f3b52;border-radius:18px;padding:24px}}.badge{{color:#7dd3fc}}</style></head><body><main><p class=\"badge\">memory.cpp</p><pre>{escaped}</pre></main></body></html>\n"
+    )
+}
+
+fn generated_memory_docs(engine: &MemoryEngine) -> Result<Vec<(String, String)>> {
+    Ok(vec![
+        (
+            "overview.md".to_string(),
+            render_share_markdown(engine, "status", true)?,
+        ),
+        (
+            "architecture.md".to_string(),
+            docs_section(
+                engine,
+                "Architecture",
+                "architecture decisions modules storage commands",
+            )?,
+        ),
+        (
+            "decisions.md".to_string(),
+            docs_section(engine, "Decisions", "decision why because chose")?,
+        ),
+        (
+            "commands.md".to_string(),
+            docs_section(engine, "Commands", "command run test build start")?,
+        ),
+        (
+            "troubleshooting.md".to_string(),
+            docs_section(engine, "Troubleshooting", "error failure fix workaround")?,
+        ),
+        (
+            "ai-context.md".to_string(),
+            context_pack_text(
+                engine,
+                None,
+                &DevContextTarget::Generic,
+                8,
+                1600,
+                false,
+                "markdown",
+            )?,
+        ),
+        (
+            "recent-changes.md".to_string(),
+            render_timeline_markdown(engine, "week", &[])?,
+        ),
+    ])
+}
+
+fn docs_section(engine: &MemoryEngine, title: &str, query: &str) -> Result<String> {
+    let scope = current_workspace_name(engine)?.unwrap_or_else(|| "default".to_string());
+    let memories = engine.search(
+        RecallQuery::new(query)
+            .workspace(scope)
+            .limit(8)
+            .include_content(true),
+    )?;
+    let mut out = format!("# {title}\n\nGenerated from local repo memory.\n\n");
+    if memories.is_empty() {
+        out.push_str("- No matching memories yet. Run `memory dev morning` and approve useful inbox candidates.\n");
+    } else {
+        for item in memories {
+            out.push_str(&format!("- {}\n", item.memory.summary));
+        }
+    }
+    Ok(out)
+}
+
+fn render_pr_markdown(engine: &MemoryEngine, action: &str, base: &str) -> Result<String> {
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let changed = git_stdout(
+        &repo_root,
+        &["diff", "--name-only", &format!("{base}...HEAD")],
+    )
+    .or_else(|_| git_stdout(&repo_root, &["diff", "--name-only"]))
+    .unwrap_or_default();
+    let files: Vec<&str> = changed
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    let mut out = String::new();
+    out.push_str(&format!("# PR {}\n\n", action.replace('-', " ")));
+    out.push_str(&format!("Base: `{base}`\n\n"));
+    out.push_str("## What changed\n");
+    if files.is_empty() {
+        out.push_str("- No changed files detected from Git.\n");
+    } else {
+        for file in files.iter().take(30) {
+            out.push_str(&format!("- `{file}`\n"));
+        }
+    }
+    out.push_str("\n## Why it matters\n");
+    for line in recent_memory_lines(engine, 5)? {
+        out.push_str(&format!("- {line}\n"));
+    }
+    out.push_str("\n## Tests to run\n");
+    for command in infer_run_commands(&repo_root).into_iter().take(5) {
+        out.push_str(&format!("- `{command}`\n"));
+    }
+    out.push_str("\n## Docs to update\n");
+    for file in files.iter().filter(|file| file.ends_with(".md")).take(8) {
+        out.push_str(&format!("- `{file}`\n"));
+    }
+    out.push_str("\n## Reviewer context\n- Run `memory context write --for generic` for a fuller local context pack.\n");
+    Ok(out)
+}
+
+fn render_timeline_markdown(
+    engine: &MemoryEngine,
+    action: &str,
+    rest: &[String],
+) -> Result<String> {
+    let scope = current_workspace_name(engine)?;
+    let mut out = String::new();
+    out.push_str("# Repo time machine\n\n");
+    out.push_str(&format!("Window: `{action}`\n\n"));
+    out.push_str("## Memory timeline\n");
+    let events = engine
+        .timeline(scope.as_deref(), None, 20)
+        .unwrap_or_default();
+    if events.is_empty() {
+        out.push_str("- No memory events recorded yet.\n");
+    } else {
+        for event in events.into_iter().take(20) {
+            out.push_str(&format!(
+                "- {}: {}\n",
+                event.created_at.format("%Y-%m-%d"),
+                event.body
+            ));
+        }
+    }
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let since = if action == "month" {
+        "30 days ago"
+    } else if action == "today" {
+        "midnight"
+    } else if action == "since" {
+        rest.get(1).map(String::as_str).unwrap_or("7 days ago")
+    } else {
+        "7 days ago"
+    };
+    out.push_str("\n## Git timeline\n");
+    match git_stdout(
+        &repo_root,
+        &["log", "--since", since, "--oneline", "--max-count", "20"],
+    ) {
+        Ok(log) if !log.is_empty() => {
+            for line in log.lines() {
+                out.push_str(&format!("- {line}\n"));
+            }
+        }
+        _ => out.push_str("- No Git timeline available for this window.\n"),
+    }
+    out.push_str("\n## What to do next\n- Run `memory dev next`.\n- Run `memory share map` for a shareable map.\n");
+    Ok(out)
+}
+
+fn render_handoff_markdown(engine: &MemoryEngine, action: &str) -> Result<String> {
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let mut out = String::new();
+    out.push_str(&format!("# {action} handoff\n\n"));
+    out.push_str("Private-safe local export. Review before sharing.\n\n");
+    out.push_str("## Project summary\n");
+    out.push_str(
+        &read_readme_brief(&repo_root).unwrap_or_else(|| "No README summary found.".to_string()),
+    );
+    out.push_str("\n\n## Commands\n");
+    for command in infer_run_commands(&repo_root) {
+        out.push_str(&format!("- `{command}`\n"));
+    }
+    out.push_str("\n## Important files\n");
+    for file in important_files(&repo_root) {
+        out.push_str(&format!("- `{file}`\n"));
+    }
+    out.push_str("\n## Recent memory\n");
+    for line in recent_memory_lines(engine, 8)? {
+        out.push_str(&format!("- {line}\n"));
+    }
+    out.push_str("\n## Import instructions\n- Keep this bundle local unless your team agrees to share it.\n- Import useful notes manually with `memory remember`.\n");
+    Ok(out)
+}
+
+fn recent_memory_lines(engine: &MemoryEngine, limit: usize) -> Result<Vec<String>> {
+    let scope = current_workspace_name(engine)?.unwrap_or_else(|| "default".to_string());
+    let results = engine.search(
+        RecallQuery::new("recent decision fix command roadmap task error")
+            .workspace(scope)
+            .limit(limit)
+            .include_content(false),
+    )?;
+    Ok(results
+        .into_iter()
+        .map(|item| item.memory.summary)
+        .collect::<Vec<_>>())
+}
+
+fn adoption_report(engine: &MemoryEngine) -> Result<Value> {
+    let base = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"));
+    let stats = engine.stats()?;
+    let checks = vec![
+        json!({"label": "setup completed", "ok": engine.store_path().exists()}),
+        json!({"label": "Git watch baseline", "ok": base.join("git-watch").join("state.json").exists()}),
+        json!({"label": "terminal memory enabled", "ok": terminal_log_path(engine).map(|p| p.exists()).unwrap_or(false)}),
+        json!({"label": "AI context generated", "ok": newest_file(&[base.join("context")], "md").is_some()}),
+        json!({"label": "project map generated", "ok": newest_file(&[base.join("maps"), base.join("demo")], "html").is_some()}),
+        json!({"label": "inbox reviewed", "ok": engine.inbox(None, Some("pending")).unwrap_or_default().is_empty()}),
+        json!({"label": "privacy checked", "ok": Path::new("docs/privacy.md").exists()}),
+        json!({"label": "attach configured", "ok": Path::new(".cursor/mcp.json").exists() || Path::new(".claude/claude_desktop_config.json").exists()}),
+        json!({"label": "memories available", "ok": stats.memories > 0}),
+    ];
+    let complete = checks
+        .iter()
+        .filter(|item| item["ok"].as_bool().unwrap_or(false))
+        .count();
+    let score = ((complete as f64 / checks.len() as f64) * 100.0).round() as u64;
+    let next = checks
+        .iter()
+        .find(|item| !item["ok"].as_bool().unwrap_or(false))
+        .and_then(|item| item["label"].as_str())
+        .map(|label| match label {
+            "Git watch baseline" => "memory git watch --once --dry-run",
+            "terminal memory enabled" => "memory terminal enable",
+            "AI context generated" => "memory context write --for cursor",
+            "project map generated" => "memory map --type evolution --output html",
+            "attach configured" => "memory attach cursor --dry-run",
+            _ => "memory dev morning",
+        })
+        .unwrap_or("memory share status");
+    Ok(json!({"score": score, "checks": checks, "next": next}))
+}
+
+fn release_check_report() -> Result<Value> {
+    let checks = vec![
+        json!({"label": "README quickstart", "ok": fs::read_to_string("README.md").unwrap_or_default().contains("Quickstart")}),
+        json!({"label": "docs exist", "ok": Path::new("docs/quickstart.md").exists()}),
+        json!({"label": "examples exist", "ok": Path::new("examples/dev-morning.md").exists()}),
+        json!({"label": "website exists", "ok": Path::new("website/index.html").exists()}),
+        json!({"label": "install scripts exist", "ok": Path::new("scripts/install.sh").exists() && Path::new("scripts/install.ps1").exists()}),
+        json!({"label": "smoke scripts exist", "ok": Path::new("scripts/smoke.sh").exists() && Path::new("scripts/smoke.ps1").exists()}),
+        json!({"label": "privacy docs exist", "ok": Path::new("docs/privacy.md").exists()}),
+        json!({"label": "license exists", "ok": Path::new("LICENSE").exists()}),
+        json!({"label": "changelog exists", "ok": Path::new("docs/changelog.md").exists()}),
+        json!({"label": "release workflow exists", "ok": Path::new(".github/workflows/release.yml").exists()}),
+        json!({"label": "pages workflow exists", "ok": Path::new(".github/workflows/pages.yml").exists()}),
+        json!({"label": ".gitattributes exists", "ok": Path::new(".gitattributes").exists()}),
+    ];
+    Ok(json!({"checks": checks}))
 }
 
 fn dev_onboard_command(
@@ -10122,6 +10882,7 @@ fn git_command(engine: &MemoryEngine, command: &GitCommand) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn git_watch_command(
     engine: &MemoryEngine,
     repo_root: &Path,
@@ -14197,6 +14958,15 @@ mod tests {
             "detach",
             "watch",
             "context",
+            "share",
+            "docs",
+            "pr",
+            "timeline",
+            "rewind",
+            "changed",
+            "handoff",
+            "adoption",
+            "release-check",
             "show-map",
             "show-brain",
             "show-timeline",
@@ -14802,6 +15572,34 @@ mod tests {
         assert!(matches!(context.action, Some(ContextAction::Write)));
         assert!(matches!(context.target, DevContextTarget::Cursor));
         assert_eq!(context.output.as_deref(), Some(Path::new("cursor.md")));
+
+        for command in [
+            "share",
+            "docs",
+            "pr",
+            "timeline",
+            "rewind",
+            "changed",
+            "handoff",
+            "adoption",
+            "release-check",
+        ] {
+            let raw = vec![
+                "memory".to_string(),
+                command.to_string(),
+                "status".to_string(),
+            ];
+            let parsed = split_manual_args(&raw).expect("split should succeed");
+            let (_, parsed_command, _) = parsed.expect("manual command should be detected");
+            assert_eq!(parsed_command, command);
+        }
+
+        let rest = vec![
+            "verify".to_string(),
+            "--dry-run".to_string(),
+            "cursor".to_string(),
+        ];
+        assert_eq!(first_positional_after_action(&rest), Some("cursor"));
     }
 
     #[test]
@@ -14905,6 +15703,11 @@ mod tests {
             "docs/roadmap.md",
             "docs/changelog.md",
             "docs/launch-checklist.md",
+            "docs/share.md",
+            "docs/pr-workflow.md",
+            "docs/timeline.md",
+            "docs/handoff.md",
+            "docs/adoption.md",
             "docs/integrations/cursor.md",
             "docs/integrations/claude.md",
             "docs/integrations/vscode.md",
@@ -14932,6 +15735,9 @@ mod tests {
             "docs/recipes/restore-after-interruption.md",
             "docs/recipes/automatic-repo-memory.md",
             "docs/recipes/review-memory-candidates.md",
+            "docs/recipes/share-project-memory.md",
+            "docs/recipes/rewind-a-project.md",
+            "docs/recipes/onboard-a-new-developer.md",
             "examples/dev-morning.md",
             "examples/dev-evening.md",
             "examples/dev-next.md",
@@ -14961,6 +15767,15 @@ mod tests {
             "examples/health.md",
             "examples/attach-cursor.md",
             "examples/attach-ollama.md",
+            "examples/share-project-memory.md",
+            "examples/onboarding-brief.md",
+            "examples/repo-health.md",
+            "examples/pr-comment.md",
+            "examples/pr-checklist.md",
+            "examples/repo-timeline.md",
+            "examples/rewind-last-week.md",
+            "examples/new-dev-handoff.md",
+            "examples/reviewer-handoff.md",
             "examples/status.md",
             "examples/today.md",
             "examples/next.md",
@@ -14968,6 +15783,21 @@ mod tests {
             "website/styles.css",
             "website/app.js",
             "website/pages/integrations.html",
+            "website/pages/tour.html",
+            "website/pages/shareable-artifacts.html",
+            "website/pages/pr-workflow.html",
+            "website/pages/repo-time-machine.html",
+            "website/pages/handoff.html",
+            "website/pages/adoption.html",
+            "launch/hacker-news.md",
+            "launch/reddit-rust.md",
+            "launch/reddit-programming.md",
+            "launch/twitter-thread.md",
+            "launch/linkedin-post.md",
+            "launch/demo-script.md",
+            "launch/gif-shot-list.md",
+            "launch/product-hunt.md",
+            "launch/changelog-v0-public.md",
         ] {
             assert!(root.join(path).exists(), "missing {path}");
         }

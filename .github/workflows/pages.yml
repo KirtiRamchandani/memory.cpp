@@ -22,9 +22,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
+      - id: configure_pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true
+        with:
+          enablement: true
+      - name: Pages unavailable
+        if: steps.configure_pages.outcome == 'failure'
+        run: |
+          echo "GitHub Pages is not available for this repository plan."
+          echo "Skipping deployment; enable Pages support in repository settings to publish the static site."
       - uses: actions/upload-pages-artifact@v3
+        if: steps.configure_pages.outcome == 'success'
         with:
           path: website
       - id: deployment
+        if: steps.configure_pages.outcome == 'success'
         uses: actions/deploy-pages@v4

@@ -201,6 +201,28 @@ memory map --type evolution --output html
 
 What just happened: the first command tells you where work stands, the second builds a local AI context pack, and the third creates a shareable project evolution map.
 
+## Shareable adoption loop
+
+The public launch loop is intentionally simple: create something useful, review it locally, then share only what you choose.
+
+```bash
+memory share status --output .memory.cpp/share/project-memory-summary.md
+memory pr summary --base main --output .memory.cpp/share/pr-summary.md
+memory timeline week --output .memory.cpp/share/repo-timeline.md
+memory handoff new-dev --output .memory.cpp/handoff
+memory adoption checklist
+```
+
+What just happened: memory.cpp generated private-safe Markdown/HTML artifacts from local repo memory, Git state, terminal/CI signals when available, and redaction rules. Nothing is uploaded by default.
+
+Docs for this loop:
+
+- [Shareable artifacts](docs/share.md)
+- [PR workflow](docs/pr-workflow.md)
+- [Repo time machine](docs/timeline.md)
+- [Handoff bundles](docs/handoff.md)
+- [Adoption checklist](docs/adoption.md)
+
 ## Integrations
 
 Attach is safe by default and backs up config files before writing.
@@ -241,6 +263,11 @@ Start here:
 - [AI context packs](docs/context-packs.md)
 - [Integrations](docs/integrations/cursor.md)
 - [Watch](docs/watch.md)
+- [Shareable artifacts](docs/share.md)
+- [PR workflow](docs/pr-workflow.md)
+- [Repo time machine](docs/timeline.md)
+- [Handoff](docs/handoff.md)
+- [Adoption checklist](docs/adoption.md)
 - [CI memory](docs/ci-memory.md)
 - [Safety](docs/safety.md)
 - [Privacy](docs/privacy.md)

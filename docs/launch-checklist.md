@@ -14,3 +14,11 @@ Use this before a public release.
 - Privacy docs explain purge, redaction, and local-first behavior.
 - Known beta limitations are documented.
 - Release workflow emits checksums.
+## Virality and adoption loop
+
+- [ ] `memory share status` generates a private-safe summary
+- [ ] `memory pr summary` creates a PR-ready Markdown body
+- [ ] `memory timeline week` works as a repo time machine
+- [ ] `memory handoff new-dev` creates a sanitized local bundle
+- [ ] `memory adoption checklist` gives the next activation step
+- [ ] `memory release-check` passes before tagging

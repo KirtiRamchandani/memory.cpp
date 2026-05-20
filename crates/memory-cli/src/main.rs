@@ -7347,6 +7347,7 @@ fn newest_file(dirs: &[PathBuf], extension: &str) -> Option<String> {
     newest.map(|(_, path)| path.display().to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn attach_command(
     engine: &MemoryEngine,
     target: &AttachTarget,
@@ -9103,7 +9104,7 @@ fn public_context_command(engine: &MemoryEngine, args: &ManualContextCli) -> Res
             emit_or_save(&rendered, Some(&output))?;
         }
         ContextAction::Open => {
-            if let Some(path) = newest_file(&[context_dir.clone()], "md") {
+            if let Some(path) = newest_file(std::slice::from_ref(&context_dir), "md") {
                 println!("{path}");
                 let _ = open_with_os(&path);
             } else {
@@ -9112,7 +9113,7 @@ fn public_context_command(engine: &MemoryEngine, args: &ManualContextCli) -> Res
             }
         }
         ContextAction::Status => {
-            let latest = newest_file(&[context_dir.clone()], "md");
+            let latest = newest_file(std::slice::from_ref(&context_dir), "md");
             let report = json!({
                 "context_dir": context_dir,
                 "latest": latest,
@@ -10122,6 +10123,7 @@ fn git_command(engine: &MemoryEngine, command: &GitCommand) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn git_watch_command(
     engine: &MemoryEngine,
     repo_root: &Path,

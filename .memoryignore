@@ -1,0 +1,9 @@
+.env
+*.pem
+*.key
+secrets/
+private/
+node_modules/
+target/
+dist/
+build/

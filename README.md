@@ -1,276 +1,280 @@
 # memory.cpp
 
-`memory.cpp` is the missing local memory layer for AI apps.
+> memory.cpp helps your repo remember what happened, why it changed, and what to do next.
 
-Think **SQLite for engineering memory**:
+**Tagline:** local-first engineering memory for developers and AI coding assistants.
 
-- one local file
-- fast enough for daily use
-- private by default
-- explainable instead of magical
-- attachable to coding agents and local model runtimes
-- visual enough to prove that it works
+`memory.cpp` is a small local memory layer for software projects. It stores useful project facts, decisions, fixes, commands, and timelines in a SQLite database under your repo, then turns that memory into daily summaries, context packs, and project maps.
 
-It is **not finished** and it should not be presented as a mythical final product yet.
+It is not a hosted AI memory service. It is not a vector database you have to design around. It is a developer tool that makes a repo easier to resume, explain, and hand to an assistant.
 
-What exists today is a strong, launchable **v0.2.1 core**:
+## Who is this for?
 
-- local memory
-- repo memory
-- visual maps
-- developer workflow recap/resume
-- MCP and proxy surfaces
-- safety defaults for agent integrations
+- Developers who switch context often and want `memory dev resume` to rebuild the thread.
+- Maintainers who want a repo to explain why things changed, not only what changed.
+- AI-coding users who want Cursor, Codex, Claude, or local models to receive accurate project context.
+- Solo developers who want daily project memory without a team platform or cloud account.
+- Teams that want local-first decision, fix, and onboarding notes before adopting heavier systems.
 
-That is the current release story.
+## Why not just ChatGPT memory?
 
-## 60-second demo
+ChatGPT memory is about a person. `memory.cpp` is about a repo.
+
+Your repo needs source paths, commits, commands, decisions, bug fixes, TODOs, test failures, and citations. Those belong next to the code, not inside one chat account. `memory.cpp` keeps that memory local and exports it as CLI output, maps, docs, and AI context packs.
+
+## Why not Git history?
+
+Git remembers diffs. `memory.cpp` remembers meaning.
+
+Git can tell you that `src/parser.rs` changed. `memory.cpp` tries to remember why the parser workaround exists, which command reproduced the failure, which decision approved it, and what to do next.
+
+## Why not a vector DB?
+
+A vector DB stores embeddings. `memory.cpp` stores engineering memory.
+
+It includes workspace scope, memory kind, tags, provenance, confidence, version history, candidate review, maps, and developer workflows. Embeddings are one retrieval tool inside the product, not the product itself.
+
+## What does it store?
+
+Stable local schema, small durable core:
+
+- Project decisions and rationale.
+- Bug fixes and error-to-fix notes.
+- Developer workflow notes and commands.
+- TODOs, roadmap notes, and next steps.
+- Git-derived summaries and candidate memories.
+- Terminal command history when you opt in.
+- CI failure notes when you import logs.
+- AI context packs and map citations generated from local memory.
+
+## What does it never store by default?
+
+- Secrets intentionally blocked by `.memoryignore` or redaction rules.
+- Private keys, API tokens, cookies, and bearer tokens when detected.
+- Terminal commands unless terminal memory is explicitly enabled.
+- Direct MCP writes unless you start MCP with write access.
+- Cloud copies. There is no hosted service in the core tool.
+
+## How does it stay local?
+
+- The default database is `.memory.cpp/memory.db`.
+- Config lives beside it in `.memory.cpp/memory-config.json`.
+- Runtime logs stay under `.memory.cpp/runtime/`.
+- MCP audit receipts stay under `.memory.cpp/audit/`.
+- The default hash and fastembed-style providers run locally.
+- Ollama and OpenAI-compatible providers are explicit choices.
+
+## How do I delete everything?
 
 ```bash
-memory --db .memory.cpp/memory.db init --workspace demo
-memory --db .memory.cpp/memory.db demo seed --workspace demo --path .
-memory --db .memory.cpp/memory.db map . --workspace demo --type evolution --output html --save .memory.cpp/demo/evolution.html
+memory where
+memory privacy purge --yes
 ```
 
-Open the generated HTML file.
+Or remove the local folder yourself:
 
-That is the first "wait, my project can explain itself" moment.
-
-## Why this project exists
-
-Most tools in this space are one of these:
-
-- memory frameworks
-- vector databases
-- agent platforms
-
-`memory.cpp` is aiming at a different category:
-
-```text
-memory.cpp
-SQLite for engineering memory.
-One file. Local. Fast. Private. Attaches to everything.
+```bash
+rm -rf .memory.cpp
 ```
 
-The long-term direction is broader than a memory database. The project is trying to become a local memory layer for:
+PowerShell:
 
-- developers
-- AI coding agents
-- project onboarding
-- debugging
-- release preparation
-- CI and domain packs later
+```powershell
+Remove-Item -Recurse -Force .memory.cpp
+```
 
-## What is working in v0.2.1
+## What is safe by default?
 
-### Core memory engine
+- Local-first storage.
+- Read-only MCP by default.
+- Secret redaction before MCP recall.
+- Candidate inbox for uncertain memory.
+- `.memoryignore` support.
+- No shell execution from MCP.
+- No cloud upload required.
 
-- local SQLite-backed durable storage
-- global and workspace-aware recall
-- importance and confidence persistence
-- derived freshness, usefulness, trust, sensitivity, and source-reliability scores
-- immutable version history for create/edit/patch/forget/restore
-- patch/supersede flow instead of append-only duplication
-- review inbox for uncertain or sensitive candidate memory
-- `.memoryignore` and `.gitignore` respected during import/watch
+## What is stable, beta, or experimental?
 
-### Visual maps
+| Area | Maturity | Notes |
+| --- | --- | --- |
+| SQLite storage | stable | Durable local memory database. |
+| Workspaces | stable | Project-scoped memory with global recall support. |
+| Remember/search/explain | stable | Core memory loop. |
+| Edit/restore/history | stable | Immutable version history. |
+| `memory dev morning/resume/next` | beta | Daily workflow surface. |
+| `memory map` HTML/Markdown/Mermaid | beta | Signature visualization surface. |
+| Candidate inbox | beta | Review uncertain automatic memory. |
+| Git ingest/summary/watch | beta | Git watch is useful but still young. |
+| Terminal memory | experimental | Opt-in command recording. |
+| CI memory | experimental | Lightweight log ingestion only. |
+| FastEmbed/ONNX provider name | experimental | Current backend is local semantic hashing; real ONNX Runtime is later. |
+| Dashboard | experimental | Local lightweight dashboard, not a heavy SPA. |
 
-- `memory map --type evolution`
-- `memory map --type timeline`
-- `memory map --type decisions`
-- `memory map --type architecture`
-- `memory map --type bugs`
-- `memory map --type dependencies`
-- outputs: `json`, `markdown`, `mermaid`, `html`
-- convenience commands: `memory map why ...`, `memory map impact ...`, `memory map compare ...`
+## Mental model
 
-### Developer workflow helpers
+```mermaid
+flowchart LR
+  Repo[Your repo] --> Signals[Git, docs, terminal, CI, notes]
+  Signals --> Inbox[Candidate inbox]
+  Inbox --> Memories[(Local SQLite memories)]
+  Memories --> Context[AI context packs]
+  Memories --> Maps[Project maps]
+  Memories --> Dev[dev morning / resume / next]
+```
 
-- `memory dev watch`
-- `memory dev morning`
-- `memory dev resume`
-- `memory dev explain-repo`
-- `memory dev next`
-- `memory doctor`
-- `memory demo`
-- `memory extract`
-- `memory git summary`
-- `memory git ingest`
-- `memory ignore init`
-- `memory ignore check`
+## Memory lifecycle
 
-### AI integration surfaces
+```mermaid
+flowchart LR
+  Capture[Capture signal] --> Candidate[Candidate]
+  Candidate --> Review[Review or auto-approve]
+  Review --> Active[Active memory]
+  Active --> Recall[Recall / context / map]
+  Active --> Edit[Edit or patch]
+  Edit --> History[Immutable history]
+  Active --> Forget[Forget / purge]
+```
 
-- OpenAI-compatible proxy
-- MCP stdio server
-- attach helpers for Cursor, Codex, Claude, VS Code, and Ollama
-- read-only MCP by default
-- workspace-scoped MCP access
-- agent audit log
-- candidate-memory tool for safer unattended agent behavior
-- `memory audit-log` for local agent-access receipts
+## Repo to context to maps
+
+```mermaid
+flowchart LR
+  Repo[Repo] --> Memory[Memories]
+  Memory --> Context[Context packs for Cursor, Codex, Claude]
+  Memory --> Maps[Why / impact / evolution maps]
+  Context --> Assistant[Better assistant answers]
+  Maps --> Human[Better human understanding]
+```
+
+## Before and after memory.cpp
+
+| Before | After |
+| --- | --- |
+| You search old chats for the reason. | `memory map why "SQLite storage"` explains it. |
+| You forget the command that fixed a test. | `memory dev recall-error "ECONNRESET"` recalls it. |
+| Your AI assistant guesses repo context. | `memory dev context --for cursor` gives grounded context. |
+| Git shows what changed. | `memory dev morning` says what changed, what broke, and what to do next. |
 
 ## Quickstart
 
-See the full guide in [docs/quickstart.md](docs/quickstart.md).
+```bash
+./scripts/install.sh --dry-run
+memory setup --developer --yes
+memory dev morning
+memory context write --for cursor --output .memory.cpp/context/cursor.md
+memory map --type evolution --output html --save .memory.cpp/demo/evolution.html
+memory doctor
+```
 
-The short version:
+If you prefer the old explicit path style:
 
 ```bash
 memory --db .memory.cpp/memory.db init --workspace demo
 memory --db .memory.cpp/memory.db demo seed --workspace demo --path .
 memory --db .memory.cpp/memory.db dev morning --workspace demo
-memory --db .memory.cpp/memory.db git summary --since 14d
-memory --db .memory.cpp/memory.db extract . --workspace demo --dry-run --limit 5
-memory --db .memory.cpp/memory.db map . --workspace demo --type evolution --output html --save .memory.cpp/demo/evolution.html
-memory --db .memory.cpp/memory.db doctor --workspace demo
-memory --db .memory.cpp/memory.db audit-log --limit 10
 ```
 
-## The best launch surfaces
+## Beginner-friendly commands
 
-### `memory map --type evolution`
+| Plain command | What it means |
+| --- | --- |
+| `memory what` | Explain what memory.cpp is doing. |
+| `memory where` | Show where local data lives. |
+| `memory today` | Show what happened today. |
+| `memory yesterday` | Show what happened yesterday. |
+| `memory next` | Suggest the next practical action. |
+| `memory welcome` | Friendly first-run overview. |
+| `memory setup --developer` | Create local config and safe defaults. |
+| `memory privacy status` | Show privacy and local-storage status. |
+| `memory show-map` | Generate a local HTML project map. |
+| `memory show-context` | Print an AI assistant context pack. |
+| `memory attach cursor --dry-run` | Preview an editor integration safely. |
+| `memory watch once --dry-run` | Preview automatic repo memory candidates. |
+
+## Three killer workflows
 
 ```bash
-memory --db .memory.cpp/memory.db map . --workspace demo --type evolution --output html --save .memory.cpp/demo/evolution.html
+memory dev morning
+memory context write --for cursor --output .memory.cpp/context/cursor.md
+memory map --type evolution --output html
 ```
 
-This generates a shareable project evolution map.
+What just happened: the first command tells you where work stands, the second builds a local AI context pack, and the third creates a shareable project evolution map.
 
-### `memory dev morning`
+## Integrations
+
+Attach is safe by default and backs up config files before writing.
 
 ```bash
-memory --db .memory.cpp/memory.db dev morning --workspace demo
+memory attach cursor --dry-run
+memory attach claude --dry-run
+memory attach vscode --dry-run
+memory attach continue --dry-run
+memory attach ollama --dry-run
+memory attach status
 ```
 
-This gives a repo recap with recent changes, decisions, bug/fix memory, conflicts, and a suggested next action.
+MCP tools are read-only by default. Memory writes require explicit approval or stay disabled in generated snippets.
 
-### `memory git summary` and `memory extract`
+## Short glossary
 
-```bash
-memory --db .memory.cpp/memory.db git summary --since 14d
-memory --db .memory.cpp/memory.db git ingest --workspace demo --since 14d
-memory --db .memory.cpp/memory.db extract . --workspace demo --dry-run --limit 5
-```
+- **Memory:** a useful project fact, decision, fix, command, or note.
+- **Workspace:** a named scope, usually one repo or project.
+- **Candidate:** a possible memory waiting for review.
+- **Provenance:** where a memory came from: file, commit, command, chat, or import.
+- **Context pack:** a clean block of repo memory for an AI assistant.
+- **Map:** a visual explanation of project evolution, decisions, bugs, and impact.
+- **MCP:** a local protocol that lets tools like Cursor or Claude ask memory.cpp for context.
+- **Proxy:** an OpenAI-compatible local endpoint that can inject memory into model requests.
+- **Embedding:** a searchable numeric representation of text. Optional, local by default.
 
-These turn repository history and docs/comments into candidate engineering memory without introducing new schema tables.
+## Documentation
 
-### `memory attach cursor`
+Start here:
 
-```bash
-memory --db .memory.cpp/memory.db attach cursor --workspace demo
-```
+- [Quickstart](docs/quickstart.md)
+- [Install](docs/install.md)
+- [First five minutes](docs/first-five-minutes.md)
+- [Core concepts](docs/core-concepts.md)
+- [CLI reference](docs/cli.md)
+- [Developer workflow](docs/dev-workflow.md)
+- [AI context packs](docs/context-packs.md)
+- [Integrations](docs/integrations/cursor.md)
+- [Watch](docs/watch.md)
+- [CI memory](docs/ci-memory.md)
+- [Safety](docs/safety.md)
+- [Privacy](docs/privacy.md)
+- [FAQ](docs/faq.md)
 
-This writes a local MCP config for Cursor with safe defaults.
+The static website lives in [website/](website/). Open [website/index.html](website/index.html) locally or deploy it with the GitHub Pages workflow.
 
-### `memory proxy`
+## Install from source
 
-```bash
-memory --db .memory.cpp/memory.db proxy --listen 127.0.0.1:7332 --upstream http://127.0.0.1:11434 --workspace demo --learn --approval-required
-```
-
-Point any OpenAI-compatible client at `http://127.0.0.1:7332/v1`.
-
-## MCP safety defaults
-
-By default, `memory mcp` is intentionally conservative:
-
-- read-only by default
-- workspace-scoped access
-- no shell execution
-- secret redaction on responses
-- audit log at `.memory.cpp/audit/mcp-access.jsonl`
-- `memory_add_candidate` exposed before direct write tools
-- `.memoryignore` patterns respected by import and watch flows
-
-Enable direct write tools only if you really want them:
+Unix:
 
 ```bash
-memory --db .memory.cpp/memory.db mcp --workspace demo --allow-writes
-```
-
-## Install
-
-### Local install from source
-
-```bash
+./scripts/install.sh --dry-run
 ./scripts/install.sh
 ```
 
 PowerShell:
 
 ```powershell
+./scripts/install.ps1 -DryRun
 ./scripts/install.ps1
 ```
 
-### Verify and smoke-test
+Verify:
 
 ```bash
-./scripts/verify.ps1
-./scripts/smoke.sh
+cargo test
+memory doctor
 ```
 
-PowerShell:
+## Project direction
 
-```powershell
-./scripts/smoke.ps1
-```
+The current public developer adoption release merges the understandability, daily-habit, and trust work into one local-first developer experience.
 
-## Documentation
+Near-term work stays in the same lane: better install verification, richer docs examples, stronger smoke coverage, and clearer beta labels.
 
-- [Quickstart](docs/quickstart.md)
-- [CLI Reference](docs/cli.md)
-- [Attach](docs/attach.md)
-- [Memory Lifecycle](docs/memory-lifecycle.md)
-- [Retrieval](docs/retrieval.md)
-- [Embeddings](docs/embeddings.md)
-- [API](docs/api.md)
-- [Maps](docs/maps.md)
-- [MCP](docs/mcp.md)
-- [Proxy](docs/proxy.md)
-- [Developer Workflow](docs/dev-workflow.md)
-- [Safety](docs/safety.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Map Examples](docs/examples/README.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Roadmap](docs/ROADMAP.md)
-
-## Project layout
-
-```text
-crates/
-  memory-core/   engine, storage, ranking, graph, import, maps
-  memory-cli/    CLI, MCP, proxy, dashboard, attach helpers
-  memory-capi/   stable C ABI
-docs/            quickstart, maps, MCP, safety, ADRs, roadmap
-include/         public C header
-scripts/         install, verify, smoke
-evals/           example eval inputs
-```
-
-## Current caveat
-
-A small group of launch-polish commands currently use a documented pre-parser because an oversized nested Clap command tree hit a stack-overflow edge case.
-
-That is acceptable for v0.2.1 because:
-
-- the behavior is intentional
-- the parser has dedicated tests
-- the limitation is documented
-- the user-facing commands work
-
-It is still a cleanup target for a future release.
-
-## What comes next
-
-The next useful expansions should happen in layers, not as a giant feature dump:
-
-1. v0.3: automatic candidate memory, Git-aware extraction, stronger local semantic embeddings
-2. v0.4: CI and defensive security/audit domain packs
-3. v0.5: mobile and webapp domain packs
-4. v1.0: sync, team memory, SDKs, deeper governance
-
-That staged path matters because the winning product is not "a memory database."
-
-It is a project that helps engineers and AI agents remember what happened, explain why it changed, and resume work without losing context.
+Deferred on purpose: fuzzing packs, mobile packs, hosted cloud sync, enterprise permissions, and plugin marketplace.

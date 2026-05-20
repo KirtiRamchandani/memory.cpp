@@ -1,6 +1,24 @@
 # CLI Reference
 
-`memory.cpp` ships a small core command tree plus a few launch-polish commands routed through a documented pre-parser.
+`memory.cpp` ships a practical command line for one job: helping your repo remember what happened, why it changed, and what to do next.
+
+## Beginner-friendly commands
+
+These are the first commands to try.
+
+```bash
+memory welcome
+memory setup --interactive
+memory what
+memory where
+memory today
+memory yesterday
+memory next
+memory show-map
+memory show-context
+memory show-inbox
+memory privacy status
+```
 
 ## Core commands
 
@@ -15,10 +33,7 @@ memory context
 memory compile
 memory import
 memory watch
-memory sleep
-memory compact
 memory timeline
-memory replay
 memory graph
 memory stats
 memory list
@@ -37,7 +52,7 @@ memory mcp
 
 ## Launch-polish commands
 
-These are currently routed through a small pre-parser to avoid a Clap stack-overflow edge case from an oversized nested command tree.
+These are routed through a small pre-parser so the launch build avoids a known Clap stack-overflow edge case from an oversized nested command tree.
 
 ```bash
 memory edit
@@ -53,79 +68,116 @@ memory map
 memory start
 memory stop
 memory status
+memory setup
+memory tutorial
+memory terminal
+memory ci
+memory embeddings
+memory privacy
 ```
 
-This is intentional for v0.2.1. The behavior is tested and the limitation is documented. A future cleanup can flatten the command tree further.
-
 ## Most important workflows
+
+### Friendly first run
+
+```bash
+memory welcome
+memory setup --developer
+memory what
+memory where
+memory privacy status
+```
 
 ### Remember and recall
 
 ```bash
-memory --db .memory.cpp/memory.db remember "Use SQLite for local-first durability." --workspace demo --kind decision
-memory --db .memory.cpp/memory.db recall "why SQLite" --workspace demo --content
-memory --db .memory.cpp/memory.db explain "why SQLite" --workspace demo
-```
-
-### Demo seed
-
-```bash
-memory --db .memory.cpp/memory.db demo seed --workspace demo --path .
-memory --db .memory.cpp/memory.db demo reset --workspace demo
+memory remember "Use SQLite for local-first durability." --workspace demo --kind decision
+memory recall "why SQLite" --workspace demo --content
+memory explain "why SQLite" --workspace demo
 ```
 
 ### Daily development flow
 
 ```bash
-memory --db .memory.cpp/memory.db dev watch ./repo --workspace demo
-memory --db .memory.cpp/memory.db dev morning --workspace demo
-memory --db .memory.cpp/memory.db dev resume "proxy launch" --workspace demo
-memory --db .memory.cpp/memory.db dev explain-repo . --workspace demo
-memory --db .memory.cpp/memory.db dev next --workspace demo
+memory dev morning --workspace demo
+memory dev resume "proxy launch" --workspace demo
+memory dev explain-repo . --workspace demo
+memory dev next --workspace demo
+memory dev context --for cursor --workspace demo
 ```
 
 ### Git-aware extraction
 
 ```bash
-memory --db .memory.cpp/memory.db git summary --since 14d
-memory --db .memory.cpp/memory.db git decisions --since 30d
-memory --db .memory.cpp/memory.db git bugs --since 30d
-memory --db .memory.cpp/memory.db git ingest --workspace demo --since 14d
-memory --db .memory.cpp/memory.db git map --workspace demo --output html --save .memory.cpp/demo/git-evolution.html
+memory git summary --since 14d
+memory git decisions --since 30d
+memory git bugs --since 30d
+memory git ingest --workspace demo --since 14d
+memory git watch --once --workspace demo
 ```
 
-### Candidate extraction and ignore rules
+### Candidate inbox
 
 ```bash
-memory --db .memory.cpp/memory.db extract . --workspace demo --dry-run --limit 8
-memory --db .memory.cpp/memory.db extract --from-git --workspace demo --since 30d --dry-run
-memory --db .memory.cpp/memory.db import . --workspace demo --preview-redactions
-memory ignore init
-memory ignore check README.md
+memory inbox list --workspace demo
+memory inbox stats --workspace demo
+memory inbox explain <id>
+memory inbox edit <id> "Better wording" --kind decision
+memory inbox approve-all --confidence-above 0.9
 ```
 
 ### Maps
 
 ```bash
-memory --db .memory.cpp/memory.db map . --workspace demo --type evolution --output html --save .memory.cpp/demo/evolution.html
-memory --db .memory.cpp/memory.db map why "MCP integration" --workspace demo --output markdown
-memory --db .memory.cpp/memory.db map impact "SQLite storage" --workspace demo --output markdown
-memory --db .memory.cpp/memory.db map compare before-launch after-launch --workspace demo --output json
+memory map . --workspace demo --type evolution --output html --save .memory.cpp/demo/evolution.html
+memory map why "MCP integration" --workspace demo --output markdown
+memory map impact "SQLite storage" --workspace demo --output markdown
+memory show-map --workspace demo
 ```
+
+### Terminal memory
+
+```bash
+memory terminal enable
+memory terminal record "cargo test" --exit-code 0 --duration-ms 12000
+memory terminal last-error
+memory terminal search "how did I run tests?"
+```
+
+Terminal memory is opt-in.
+
+### AI context packs
+
+```bash
+memory dev context --for cursor --workspace demo
+memory dev context --for codex --workspace demo
+memory dev context --for claude --workspace demo
+```
+
+### Embeddings
+
+```bash
+memory embeddings status
+memory embeddings list
+memory embeddings set fastembed
+memory embeddings migrate --to fastembed --dry-run
+```
+
+`fastembed` in this launch build is a zero-dependency local semantic-hashing backend. Real ONNX Runtime integration is documented as a later backend.
 
 ### Runtime management
 
 ```bash
-memory --db .memory.cpp/memory.db start --workspace demo --proxy
-memory --db .memory.cpp/memory.db status
-memory --db .memory.cpp/memory.db stop
-memory --db .memory.cpp/memory.db audit-log --limit 20
+memory start --workspace demo --proxy
+memory status
+memory stop
+memory audit-log --limit 20
 ```
 
 ## Output guidance
 
-- use `--json` for machine-readable CLI output where available
-- use `--save <path>` with `memory map` when generating HTML, Mermaid, or Markdown files you want to keep
-- use `doctor` before sharing a demo or attaching agents
-- create a `.memoryignore` file before using `import` or `dev watch` on a real repository
-- use `proxy --learn --approval-required` when you want passive learning without unattended direct writes
+- Use `--json` for automation.
+- Use `--save <path>` with maps and reports you want to keep.
+- Use `doctor` before sharing a demo or attaching agents.
+- Create `.memoryignore` before importing or watching a real repository.
+- Use `proxy --learn --approval-required` when you want passive learning without unattended direct writes.

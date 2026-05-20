@@ -142,6 +142,8 @@ impl MemoryEngine {
                     "memory_cpp": {
                         "candidate_kind": input.kind,
                         "confidence": input.attributes.confidence,
+                        "tags": input.attributes.tags,
+                        "source": input.attributes.source,
                         "policy_mode": policy.as_ref().map(|value| format!("{:?}", value.mode)),
                     }
                 }),
@@ -898,6 +900,10 @@ impl MemoryEngine {
 
     pub fn inbox(&self, scope: Option<&str>, status: Option<&str>) -> Result<Vec<InboxEntry>> {
         self.store.list_inbox(scope, status)
+    }
+
+    pub fn update_inbox_entry(&self, entry: &InboxEntry) -> Result<()> {
+        self.store.queue_inbox(entry)
     }
 
     pub fn list_versions(&self, memory_id: &str, limit: usize) -> Result<Vec<MemoryVersion>> {

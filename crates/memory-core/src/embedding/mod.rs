@@ -5,7 +5,7 @@ mod hash;
 #[cfg(feature = "http")]
 mod providers;
 
-pub use hash::HashEmbedder;
+pub use hash::{FastEmbedOnnxEmbedder, HashEmbedder};
 
 #[cfg(feature = "http")]
 pub use providers::{OllamaEmbedder, OpenAiCompatibleEmbedder};

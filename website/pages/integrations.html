@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Connect memory.cpp to Cursor, Claude, VS Code, Codex, Continue, and Ollama with safe local-first defaults.">
+  <title>memory.cpp integrations</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="../index.html"><span class="dot"></span>memory.cpp</a>
+    <nav><a href="quickstart.html">Quickstart</a><a href="cli.html">CLI</a><a href="recipes.html">Recipes</a><a href="safety-privacy.html">Privacy</a><button id="themeToggle" type="button">Dark mode</button></nav>
+  </header>
+  <main>
+    <section class="page-hero window">
+      <div class="window-bar"><span></span><span></span><span></span><strong>integrations</strong></div>
+      <div class="window-body">
+        <p class="eyebrow">AI coding tools</p>
+        <h1>Attach safely.</h1>
+        <p class="lede">Use memory.cpp with Cursor, Claude, VS Code, Codex, Continue, and Ollama while keeping MCP read-only by default.</p>
+        <pre><code>$ memory attach cursor --dry-run
+$ memory attach --print-config cursor
+$ memory attach cursor --yes
+$ memory attach status</code></pre>
+      </div>
+    </section>
+    <section class="grid three">
+      <article class="card"><h2>Cursor</h2><p>Writes `.cursor/mcp.json` with a local MCP server.</p><pre><code>memory attach cursor --dry-run</code></pre></article>
+      <article class="card"><h2>Claude</h2><p>Generates a Claude Desktop-style config snippet for local use.</p><pre><code>memory attach claude --dry-run</code></pre></article>
+      <article class="card"><h2>VS Code</h2><p>Creates `.vscode/mcp.json` for compatible editor tooling.</p><pre><code>memory attach vscode --dry-run</code></pre></article>
+      <article class="card"><h2>Codex</h2><p>Prefer context packs when direct attach is not available.</p><pre><code>memory context write --for codex</code></pre></article>
+      <article class="card"><h2>Continue</h2><p>Creates a local `.continue/mcp.json` snippet.</p><pre><code>memory attach continue --dry-run</code></pre></article>
+      <article class="card"><h2>Ollama</h2><p>Prints proxy setup without starting long-running services by surprise.</p><pre><code>memory attach ollama --dry-run</code></pre></article>
+    </section>
+    <section class="window"><div class="window-bar"><span></span><span></span><span></span><strong>safety</strong></div><div class="window-body"><h2>Safe defaults</h2><p>Read-only MCP tools are enabled by default. `memory_add`, `memory_patch`, and `memory_forget` require explicit approval or remain disabled in generated snippets.</p><pre><code>memory detach cursor --dry-run
+memory privacy status
+memory attach doctor</code></pre></div></section>
+  </main>
+  <footer>memory.cpp - local repo memory for developers and AI coding tools</footer>
+  <script src="../app.js"></script>
+</body>
+</html>

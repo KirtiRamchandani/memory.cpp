@@ -40,6 +40,7 @@ jobs:
           mkdir -p dist
           cp "${{ matrix.bin_path }}" dist/memory
           tar -czf "${{ matrix.archive_name }}" -C dist memory
+          shasum -a 256 "${{ matrix.archive_name }}" > "${{ matrix.archive_name }}.sha256"
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -47,11 +48,15 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item "${{ matrix.bin_path }}" dist\memory.exe
           Compress-Archive -Path dist\memory.exe -DestinationPath "${{ matrix.archive_name }}" -Force
+          $hash = (Get-FileHash "${{ matrix.archive_name }}" -Algorithm SHA256).Hash.ToLower()
+          "$hash  ${{ matrix.archive_name }}" | Set-Content "${{ matrix.archive_name }}.sha256"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.archive_name }}
+          path: |
+            ${{ matrix.archive_name }}
+            ${{ matrix.archive_name }}.sha256
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -61,7 +66,13 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: release-artifacts
+      - name: Combine checksums
+        shell: bash
+        run: |
+          find release-artifacts -name '*.sha256' -print0 | sort -z | xargs -0 cat > checksums.txt
       - uses: softprops/action-gh-release@v2
         with:
-          files: release-artifacts/**/**
+          files: |
+            release-artifacts/**/**
+            checksums.txt
           generate_release_notes: true

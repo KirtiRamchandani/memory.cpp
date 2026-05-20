@@ -14,13 +14,13 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, Utc};
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use memory_core::{
-    check_ignored_path, collect_importable_files, evaluate, import_path, parse_file, EvalCase,
-    HashEmbedder, ImportFormat, ImportOptions, MapOutputFormat, MapRequest, MapType, MemoryEdit,
-    MemoryEngine, MemoryKind, MemoryLayer, MemoryPermission, MemorySource, MemoryStatus, NewMemory,
-    OllamaEmbedder, OpenAiCompatibleEmbedder, PersonaProfile, PolicyMode, RecallQuery,
-    SharedEmbedder, DEFAULT_MEMORYIGNORE,
+    check_ignored_path, collect_importable_files, evaluate, import_path, parse_file, Embedder,
+    EvalCase, FastEmbedOnnxEmbedder, HashEmbedder, ImportFormat, ImportOptions, MapOutputFormat,
+    MapRequest, MapType, MemoryEdit, MemoryEngine, MemoryKind, MemoryLayer, MemoryPermission,
+    MemorySource, MemoryStatus, NewMemory, OllamaEmbedder, OpenAiCompatibleEmbedder,
+    PersonaProfile, PolicyMode, RecallQuery, SharedEmbedder, DEFAULT_MEMORYIGNORE,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -57,6 +57,54 @@ enum EmbedderChoice {
     Hash,
     Ollama,
     Openai,
+    Fastembed,
+    Onnx,
+}
+
+impl EmbedderChoice {
+    fn provider_name(&self) -> &'static str {
+        match self {
+            Self::Hash => "hash",
+            Self::Ollama => "ollama",
+            Self::Openai => "openai",
+            Self::Fastembed | Self::Onnx => "fastembed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+enum SearchProfile {
+    Dev,
+    Error,
+    Decision,
+    Code,
+    Docs,
+    Test,
+    Terminal,
+    Git,
+    Ci,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+enum DevContextTarget {
+    Cursor,
+    Codex,
+    Claude,
+    Vscode,
+    Continue,
+    Aider,
+    Copilot,
+    Ollama,
+    Openai,
+    Generic,
+    SmallModel,
+    LargeModel,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+enum DevOnboardOutput {
+    Markdown,
+    Json,
 }
 
 #[derive(Debug, Clone, ValueEnum)]
@@ -93,8 +141,10 @@ enum AttachTarget {
     Cursor,
     Claude,
     Codex,
+    Continue,
     Ollama,
     Vscode,
+    All,
 }
 
 #[derive(Debug, Clone, ValueEnum)]
@@ -248,6 +298,9 @@ enum Command {
 
         #[arg(long, value_delimiter = ',')]
         tags: Vec<String>,
+
+        #[arg(long, value_enum)]
+        profile: Option<SearchProfile>,
 
         #[arg(long, default_value_t = 8)]
         limit: usize,
@@ -686,12 +739,127 @@ enum InboxCommand {
         status: Option<String>,
 
         #[arg(long)]
+        simple: bool,
+
+        #[arg(long)]
+        important: bool,
+
+        #[arg(long)]
+        risky: bool,
+
+        #[arg(long)]
+        json: bool,
+    },
+    Stats {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Review {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Explain {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    Edit {
+        id: String,
+        content: Option<String>,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long, value_parser = parse_kind)]
+        kind: Option<MemoryKind>,
+        #[arg(long)]
+        confidence: Option<f32>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        source_file: Option<String>,
+        #[arg(long)]
+        source_commit: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
         json: bool,
     },
     Approve {
         id: String,
     },
     Reject {
+        id: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    RejectAll {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Snooze {
+        id: String,
+    },
+    Merge {
+        a: String,
+        b: String,
+    },
+    Similar {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    Source {
+        id: String,
+    },
+    Preview {
+        id: String,
+    },
+    Rules {
+        #[command(subcommand)]
+        command: Option<InboxRulesCommand>,
+    },
+    Export {
+        output: PathBuf,
+        #[arg(long)]
+        workspace: Option<String>,
+    },
+    ClearRejected {
+        #[arg(long)]
+        yes: bool,
+    },
+    ApproveAll {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long, default_value_t = 0.9)]
+        confidence_above: f32,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum InboxRulesCommand {
+    Add {
+        pattern: String,
+        #[arg(long, default_value = "review")]
+        action: String,
+        #[arg(long)]
+        confidence_above: Option<f32>,
+    },
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    Remove {
         id: String,
     },
 }
@@ -757,6 +925,221 @@ enum DevCommand {
         #[arg(long)]
         json: bool,
     },
+    RecallError {
+        error: String,
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long, default_value_t = 8)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    TestFailures {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    RecallTest {
+        test: String,
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long, default_value_t = 8)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    Context {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long = "for", value_enum, default_value_t = DevContextTarget::Generic)]
+        target: DevContextTarget,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long, alias = "budget", default_value_t = 1_600)]
+        tokens: usize,
+        #[arg(long)]
+        verbose: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Onboard {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long, value_enum, default_value_t = DevOnboardOutput::Markdown)]
+        output: DevOnboardOutput,
+        #[arg(long)]
+        save: Option<PathBuf>,
+    },
+    ReadmeSuggest {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Changelog {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Health {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    PrSummary {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Review {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Evening {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        verbose: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Today {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        verbose: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Yesterday {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        verbose: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Week {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        verbose: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Focus {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Tasks {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Blockers {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Risks {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Cleanup {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    DocsGap {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    StaleDecisions {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    StaleTodos {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    ChangedFiles {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    HotFiles {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    CommonErrors {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    CommonCommands {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Roadmap {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    ReleaseNotes {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    SetupGuide {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Architecture {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    ExplainCommand {
+        cmd: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -806,6 +1189,8 @@ struct ManualInitCli {
     encrypted: bool,
     #[arg(long)]
     workspace: Option<String>,
+    #[arg(long)]
+    interactive: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -825,6 +1210,299 @@ struct ManualImportCli {
     preview_redactions: bool,
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualRememberCli {
+    #[arg(required = true, num_args = 1..)]
+    content: Vec<String>,
+    #[arg(long, default_value = "note", value_parser = parse_kind)]
+    kind: MemoryKind,
+    #[arg(long)]
+    workspace: Option<String>,
+    #[arg(long, value_delimiter = ',')]
+    tags: Vec<String>,
+    #[arg(long)]
+    metadata: Option<String>,
+    #[arg(long)]
+    importance: Option<f32>,
+    #[arg(long)]
+    confidence: Option<f32>,
+    #[arg(long)]
+    source: Option<String>,
+    #[arg(long)]
+    source_type: Option<String>,
+    #[arg(long)]
+    source_file: Option<String>,
+    #[arg(long)]
+    source_line: Option<u64>,
+    #[arg(long)]
+    source_commit: Option<String>,
+    #[arg(long)]
+    source_conversation: Option<String>,
+    #[arg(long)]
+    created_by: Option<String>,
+    #[arg(long)]
+    permission: Option<String>,
+    #[arg(long)]
+    layer: Option<String>,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualRecallCli {
+    #[arg(required = true, num_args = 1..)]
+    query: Vec<String>,
+    #[arg(long)]
+    workspace: Option<String>,
+    #[arg(long = "kind", value_parser = parse_kind)]
+    kinds: Vec<MemoryKind>,
+    #[arg(long, value_delimiter = ',')]
+    tags: Vec<String>,
+    #[arg(long, value_enum)]
+    profile: Option<SearchProfile>,
+    #[arg(long)]
+    explain: bool,
+    #[arg(long, default_value_t = 8)]
+    limit: usize,
+    #[arg(long)]
+    content: bool,
+    #[arg(long)]
+    include_inactive: bool,
+    #[arg(long)]
+    no_global: bool,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualInboxCli {
+    #[command(subcommand)]
+    command: Option<InboxCommand>,
+    #[arg(long)]
+    workspace: Option<String>,
+    #[arg(long)]
+    status: Option<String>,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualEmbeddingsCli {
+    #[command(subcommand)]
+    command: EmbeddingsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum EmbeddingsCommand {
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    Set {
+        provider: EmbedderChoice,
+        #[arg(long)]
+        endpoint: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        dimensions: Option<usize>,
+    },
+    Migrate {
+        #[arg(long = "to")]
+        provider: EmbedderChoice,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Doctor {
+        #[arg(long)]
+        json: bool,
+    },
+    Refresh {
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Benchmark {
+        #[arg(long)]
+        json: bool,
+    },
+    Compare {
+        left: Option<EmbedderChoice>,
+        right: Option<EmbedderChoice>,
+        #[arg(long)]
+        json: bool,
+    },
+    Explain,
+}
+
+#[derive(Debug, Parser)]
+struct ManualTerminalCli {
+    #[command(subcommand)]
+    command: TerminalCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum TerminalCommand {
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    Enable {
+        #[arg(long)]
+        shell: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Record {
+        #[arg(long)]
+        command: String,
+        #[arg(long, default_value_t = 0)]
+        exit_code: i32,
+        #[arg(long)]
+        cwd: Option<PathBuf>,
+        #[arg(long)]
+        duration_ms: Option<u64>,
+    },
+    Commands {
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    LastError {
+        #[arg(long)]
+        json: bool,
+    },
+    Search {
+        query: String,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    Suggest {
+        query: Option<String>,
+        #[arg(long, default_value_t = 8)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    Pause {
+        #[arg(long)]
+        json: bool,
+    },
+    Resume {
+        #[arg(long)]
+        json: bool,
+    },
+    Purge {
+        #[arg(long)]
+        yes: bool,
+    },
+    Export {
+        output: PathBuf,
+    },
+    InstallShell {
+        shell: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Privacy {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Parser)]
+struct ManualCiCli {
+    #[command(subcommand)]
+    command: CiCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum CiCommand {
+    Ingest {
+        path: PathBuf,
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    ExplainFailure {
+        query: Option<String>,
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long, default_value_t = 8)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    Last {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Similar {
+        query: Option<String>,
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long, default_value_t = 8)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    Flaky {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    KnownFailures {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    FixHistory {
+        query: Option<String>,
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Health {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Export {
+        output: PathBuf,
+        #[arg(long)]
+        workspace: Option<String>,
+    },
+    Report {
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        workspace: Option<String>,
+    },
+    PrComment {
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        workspace: Option<String>,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -856,7 +1534,7 @@ struct ManualMapCli {
     dependencies: bool,
     #[arg(long, value_enum, default_value_t = CliMapOutput::Markdown)]
     output: CliMapOutput,
-    #[arg(long)]
+    #[arg(long, alias = "since")]
     from: Option<String>,
     #[arg(long)]
     to: Option<String>,
@@ -888,7 +1566,7 @@ struct ManualMapCompareCli {
     map_type: CliMapType,
     #[arg(long, value_enum, default_value_t = CliMapOutput::Markdown)]
     output: CliMapOutput,
-    #[arg(long)]
+    #[arg(long, alias = "since")]
     from: Option<String>,
     #[arg(long)]
     to: Option<String>,
@@ -912,7 +1590,7 @@ struct ManualMapFocusCli {
     workspace: Option<String>,
     #[arg(long, value_enum, default_value_t = CliMapOutput::Markdown)]
     output: CliMapOutput,
-    #[arg(long)]
+    #[arg(long, alias = "since")]
     from: Option<String>,
     #[arg(long)]
     to: Option<String>,
@@ -955,6 +1633,85 @@ struct ManualAttachCli {
     start_proxy: bool,
     #[arg(long)]
     workspace: Option<String>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    yes: bool,
+    #[arg(long = "print-config")]
+    print_config: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualDetachCli {
+    target: AttachTarget,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    yes: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualWatchCli {
+    #[command(subcommand)]
+    action: Option<WatchAction>,
+    #[arg(long, global = true)]
+    workspace: Option<String>,
+    #[arg(long, default_value_t = 15, global = true)]
+    interval: u64,
+    #[arg(long, global = true)]
+    foreground: bool,
+    #[arg(long, global = true)]
+    once: bool,
+    #[arg(long, global = true)]
+    dry_run: bool,
+    #[arg(long, global = true)]
+    json: bool,
+}
+
+#[derive(Debug, Subcommand)]
+enum WatchAction {
+    Start,
+    Stop,
+    Status,
+    Once,
+    Pause,
+    Resume,
+    Doctor,
+}
+
+#[derive(Debug, Parser)]
+struct ManualContextCli {
+    #[command(subcommand)]
+    action: Option<ContextAction>,
+    #[arg(long = "for", value_enum, default_value_t = DevContextTarget::Generic, global = true)]
+    target: DevContextTarget,
+    #[arg(long, global = true)]
+    workspace: Option<String>,
+    #[arg(long, default_value_t = 10, global = true)]
+    limit: usize,
+    #[arg(long, default_value_t = 1600, global = true)]
+    budget: usize,
+    #[arg(long, global = true)]
+    output: Option<PathBuf>,
+    #[arg(long, default_value = "markdown", global = true)]
+    format: String,
+    #[arg(long, global = true)]
+    verbose: bool,
+    #[arg(long, global = true)]
+    json: bool,
+    #[arg(long, global = true)]
+    copy: bool,
+}
+
+#[derive(Debug, Subcommand)]
+enum ContextAction {
+    Build,
+    Open,
+    Write,
+    Status,
+    Refresh,
+    Diff,
+    Explain,
 }
 
 #[derive(Debug, Parser)]
@@ -1100,6 +1857,315 @@ enum GitCommand {
         #[arg(long)]
         json: bool,
     },
+    Watch {
+        #[command(subcommand)]
+        action: Option<GitWatchAction>,
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long, default_value_t = 15)]
+        interval_secs: u64,
+        #[arg(long)]
+        daemon: bool,
+        #[arg(long)]
+        once: bool,
+        #[arg(long, default_value_t = 32)]
+        limit: usize,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Today {
+        #[arg(long)]
+        json: bool,
+    },
+    Yesterday {
+        #[arg(long)]
+        json: bool,
+    },
+    Week {
+        #[arg(long)]
+        json: bool,
+    },
+    Branch {
+        branch: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    DiffMemory {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    ReleaseNotes {
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    WhyFileChanged {
+        file: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    HotFiles {
+        #[arg(long)]
+        json: bool,
+    },
+    DependencyChanges {
+        #[arg(long)]
+        json: bool,
+    },
+    TestChanges {
+        #[arg(long)]
+        json: bool,
+    },
+    DocsChanges {
+        #[arg(long)]
+        json: bool,
+    },
+    RiskyChanges {
+        #[arg(long)]
+        json: bool,
+    },
+    ForgottenChanges {
+        #[arg(long)]
+        json: bool,
+    },
+    SummarizeCommit {
+        sha: String,
+        #[arg(long)]
+        json: bool,
+    },
+    SummarizeBranch {
+        branch: String,
+        #[arg(long)]
+        json: bool,
+    },
+    CompareBranches {
+        left: String,
+        right: String,
+        #[arg(long)]
+        json: bool,
+    },
+    MapBranch {
+        branch: Option<String>,
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        save: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum GitWatchAction {
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    Pause,
+    Resume,
+    ResetBaseline {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Parser)]
+struct ManualSetupCli {
+    #[arg(long)]
+    interactive: bool,
+    #[arg(long)]
+    minimal: bool,
+    #[arg(long)]
+    developer: bool,
+    #[arg(long)]
+    ai_coding: bool,
+    #[arg(long)]
+    private: bool,
+    #[arg(long)]
+    offline: bool,
+    #[arg(long)]
+    yes: bool,
+    #[arg(long)]
+    reset: bool,
+    #[arg(long)]
+    workspace: Option<String>,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualDayCli {
+    #[arg(long)]
+    workspace: Option<String>,
+    #[arg(long)]
+    verbose: bool,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualStatusCli {
+    #[arg(long)]
+    json: bool,
+    #[arg(long)]
+    verbose: bool,
+    #[arg(long)]
+    runtime: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualExplainCli {
+    #[arg(required = false, num_args = 1..)]
+    query: Vec<String>,
+    #[arg(long)]
+    workspace: Option<String>,
+    #[arg(long, default_value_t = 8)]
+    limit: usize,
+    #[arg(long)]
+    last: bool,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualExamplesCli {
+    area: Option<String>,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualFixCli {
+    #[arg(long)]
+    apply: bool,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct ManualTutorialCli {
+    #[command(subcommand)]
+    command: Option<TutorialCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+enum TutorialCommand {
+    Start {
+        #[arg(long)]
+        workspace: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Parser)]
+struct ManualPrivacyCli {
+    #[command(subcommand)]
+    command: Option<PrivacyCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+enum PrivacyCommand {
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    Explain,
+    Purge {
+        #[arg(long)]
+        yes: bool,
+    },
+    Reset {
+        #[arg(long)]
+        yes: bool,
+    },
+    Export {
+        output: PathBuf,
+    },
+    Receipts {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Parser)]
+struct ManualShowMapCli {
+    #[arg(long)]
+    workspace: Option<String>,
+    #[arg(long, default_value = ".memory.cpp/demo/evolution.html")]
+    save: PathBuf,
+}
+
+#[derive(Debug, Parser)]
+struct ManualOpenCli {
+    target: Option<String>,
+    #[arg(long = "print")]
+    print_target: Option<String>,
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+    #[arg(long, default_value_t = 7331)]
+    port: u16,
+}
+
+#[derive(Debug, Parser)]
+struct ManualRedactCli {
+    #[command(subcommand)]
+    command: RedactCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum RedactCommand {
+    Preview {
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    Test {
+        file: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Parser)]
+struct ManualConfigCli {
+    #[command(subcommand)]
+    command: Option<ConfigCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommand {
+    Show {
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        key: String,
+    },
+    Set {
+        key: String,
+        value: String,
+    },
+    Edit,
+    Doctor {
+        #[arg(long)]
+        json: bool,
+    },
+    Reset {
+        #[arg(long)]
+        yes: bool,
+    },
+    Export {
+        output: PathBuf,
+    },
+    Import {
+        input: PathBuf,
+    },
+    Path,
+    Profiles,
 }
 
 #[derive(Debug, Parser)]
@@ -1123,6 +2189,23 @@ enum IgnoreCommand {
         #[arg(long)]
         json: bool,
     },
+    List {
+        #[arg(long)]
+        root: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    Explain,
+    Add {
+        pattern: String,
+        #[arg(long)]
+        root: Option<PathBuf>,
+    },
+    Remove {
+        pattern: String,
+        #[arg(long)]
+        root: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1145,12 +2228,24 @@ impl Default for McpPersistedConfig {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
+struct EmbeddingPersistedConfig {
+    provider: Option<String>,
+    endpoint: Option<String>,
+    model: Option<String>,
+    dimensions: Option<usize>,
+    migrated_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Default)]
 #[serde(default)]
 struct AppConfig {
     default_workspace: Option<String>,
+    profile: Option<String>,
     encrypted_requested: bool,
     mcp: McpPersistedConfig,
+    embedding: EmbeddingPersistedConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -1242,6 +2337,24 @@ struct GitCommitRecord {
     files: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TodoHit {
+    path: String,
+    line: usize,
+    text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TerminalEntry {
+    recorded_at: DateTime<Utc>,
+    command: String,
+    exit_code: i32,
+    cwd: String,
+    #[serde(default)]
+    git_branch: Option<String>,
+    duration_ms: Option<u64>,
+}
+
 impl From<&Cli> for EngineOptions {
     fn from(value: &Cli) -> Self {
         Self {
@@ -1320,6 +2433,7 @@ fn main() -> Result<()> {
             workspace,
             kinds,
             tags,
+            profile,
             limit,
             content,
             include_inactive,
@@ -1332,6 +2446,8 @@ fn main() -> Result<()> {
                 workspace: workspace.as_ref(),
                 kinds,
                 tags,
+                profile: profile.as_ref(),
+                explain: false,
                 limit: *limit,
                 include_content: *content,
                 include_inactive: *include_inactive,
@@ -1469,6 +2585,9 @@ fn main() -> Result<()> {
             upstream,
             *start_proxy,
             workspace.as_ref(),
+            false,
+            true,
+            false,
         )?,
         Command::Serve { host, port } => serve_command(engine, host, *port, false)?,
         Command::Dashboard { host, port } => serve_command(engine, host, *port, true)?,
@@ -1530,35 +2649,78 @@ fn main() -> Result<()> {
 }
 
 fn print_extended_help() -> Result<()> {
-    let mut command = Cli::command();
-    command.print_help()?;
-    println!("\n\nAdditional v0.2 commands:");
-    println!("  edit <id> [content]           Edit memory content/metadata in place");
-    println!("  restore <id>                  Restore the latest active version of a memory");
+    println!("memory");
     println!(
-        "  demo --workspace demo         Seed a launch-ready demo workspace and sample map files"
+        "memory.cpp helps your repo remember what happened, why it changed, and what to do next."
     );
+    println!();
+    println!("Usage:");
+    println!("  memory [--db PATH] [--embedder hash|fastembed|ollama|openai] <command>");
+    println!();
+    println!("Beginner-friendly commands:");
+    println!("  welcome                         Friendly first-run overview");
+    println!("  setup --interactive             Guided local setup for this repo");
+    println!("  what                            Explain what memory.cpp is doing");
+    println!("  where                           Show where local data is stored");
+    println!("  today | yesterday               Show a simple repo recap");
+    println!("  next                            Suggest the next practical action");
+    println!("  show-map                        Generate/open the project evolution map");
+    println!("  show-context                    Build an AI assistant context pack");
+    println!("  show-inbox                      Review pending memory candidates");
+    println!("  privacy status                  Show local-first safety status");
+    println!();
+    println!("Core commands:");
+    println!("  init [--workspace <name>]       Initialize a local memory store");
+    println!("  remember|add <text>             Store a memory");
+    println!("  recall|search <query>           Search memory; supports --profile dev|error|decision|code|docs|test");
+    println!("  explain <query>                 Explain recall/ranking");
+    println!("  edit <id> [content]             Edit memory content or metadata");
+    println!("  restore <id>                    Restore the latest active version");
+    println!("  workspace <cmd>                 Create, switch, list, or show workspaces");
+    println!("  stats                           Show store statistics");
+    println!();
+    println!("Developer workflow:");
+    println!("  dev morning                     Daily recap: work, changes, breakage, TODOs, next command");
+    println!("  dev resume [query]              Reconstruct interrupted work with AI context");
+    println!("  dev explain-repo                Instant repo briefing");
+    println!("  dev next                        Practical next actions grounded in repo state");
+    println!("  dev recall-error <error>        Recall previous fixes for an error");
+    println!("  dev test-failures               Show remembered flaky/failing tests");
+    println!("  dev recall-test <name>          Recall fixes for a specific test");
+    println!("  dev context --for cursor|codex|claude");
+    println!("  dev onboard --output markdown   Generate onboarding notes");
+    println!("  dev readme-suggest              Suggest README updates without editing");
+    println!("  dev changelog --since <ref|30d> Generate changelog bullets");
+    println!("  dev health                      Repo health summary");
+    println!("  dev pr-summary                  Lightweight PR summary");
+    println!("  dev review                      Recall review/style memory");
+    println!();
+    println!("Automation and inbox:");
+    println!("  git ingest|summary|decisions|bugs|map|watch");
+    println!("  inbox [list]                    Review pending candidates");
+    println!("  inbox stats|explain|edit|approve|reject|approve-all");
+    println!("  terminal enable|record|commands|last-error|search");
+    println!("  ci ingest <log>|explain-failure");
+    println!();
+    println!("Maps and integrations:");
+    println!("  map [PATH] --type evolution --output html --save evolution.html");
+    println!("  map why <topic>                 Explain why a feature or decision exists");
     println!(
-        "  doctor                        Diagnose local setup, safety defaults, and runtime health"
+        "  map impact <topic>              Show affected files, commands, tests, docs, and risks"
     );
-    println!("  audit-log                     Inspect recorded MCP agent access receipts");
+    println!("  attach cursor|claude|codex|ollama");
+    println!("  proxy --learn --approval-required");
+    println!("  mcp                             Read-only, redacted MCP server by default");
+    println!("  embeddings status|list|set|migrate");
+    println!("  doctor                          Diagnose local setup and exact fixes");
+    println!("  start | stop | status           Lightweight runtime management");
+    println!();
+    println!("Parser note:");
     println!(
-        "  extract [PATH]                Extract candidate memory from repo files or git history"
+        "  Launch commands use a small manual pre-parser to avoid a known Clap stack-overflow edge"
     );
-    println!("  git ingest|summary|map        Git-aware project memory helpers");
-    println!("  ignore init|check             Manage .memoryignore safety rules");
-    println!("  dev watch|morning|resume      Solo-dev workflow helpers");
-    println!(
-        "  dev explain-repo|next         Explain repo structure and recommend the next actions"
-    );
-    println!("  map [PATH]                    Render evolution/decision/architecture maps");
-    println!("  map why <topic>               Explain why a project decision or feature exists");
-    println!("  map impact <topic>            Show what depends on a decision or component");
-    println!("  map compare <left> <right>    Diff two map snapshots or exported map files");
-    println!("  start | stop | status         Lightweight runtime management for server/proxy");
-    println!("\nParser note: a few v0.2.1 commands are routed through a small pre-parser to avoid a Clap");
-    println!("stack-overflow edge case from an oversized nested command tree. The behavior is tested and");
-    println!("documented, and the tree can be simplified further in a future cleanup pass.");
+    println!("  case from the oversized nested command tree. The static help page keeps the CLI launchable");
+    println!("  while the command tree is split into smaller modules.");
     Ok(())
 }
 
@@ -1573,7 +2735,25 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
                 std::iter::once(command.clone()).chain(rest.iter().cloned()),
             );
             let engine = build_engine_from_options(&options)?;
-            init_command(&engine, args.encrypted, args.workspace)?;
+            if args.interactive {
+                setup_command(
+                    &engine,
+                    &ManualSetupCli {
+                        interactive: true,
+                        minimal: false,
+                        developer: true,
+                        ai_coding: false,
+                        private: false,
+                        offline: false,
+                        yes: false,
+                        reset: false,
+                        workspace: args.workspace,
+                        json: false,
+                    },
+                )?;
+            } else {
+                init_command(&engine, args.encrypted, args.workspace)?;
+            }
         }
         "edit" => {
             let args = ManualEditCli::parse_from(
@@ -1626,6 +2806,69 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
                 },
             )?;
         }
+        "remember" | "add" => {
+            let args = ManualRememberCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            remember_command(
+                &engine,
+                &args.content,
+                args.kind,
+                args.workspace.as_ref(),
+                &args.tags,
+                &args.metadata,
+                args.importance,
+                args.confidence,
+                args.source.as_deref(),
+                args.source_type.as_deref(),
+                args.source_file.as_deref(),
+                args.source_line,
+                args.source_commit.as_deref(),
+                args.source_conversation.as_deref(),
+                args.created_by.as_deref(),
+                args.permission.as_deref(),
+                args.layer.as_deref(),
+                args.json,
+            )?;
+        }
+        "recall" | "search" => {
+            let args = ManualRecallCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            recall_command(
+                &engine,
+                RecallCommandOptions {
+                    query: &args.query,
+                    workspace: args.workspace.as_ref(),
+                    kinds: &args.kinds,
+                    tags: &args.tags,
+                    profile: args.profile.as_ref(),
+                    explain: args.explain,
+                    limit: args.limit,
+                    include_content: args.content,
+                    include_inactive: args.include_inactive,
+                    include_global: !args.no_global,
+                    json_output: args.json,
+                },
+            )?;
+        }
+        "inbox" => {
+            let args = ManualInboxCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            let command = args.command.unwrap_or(InboxCommand::List {
+                workspace: args.workspace,
+                status: args.status,
+                simple: false,
+                important: false,
+                risky: false,
+                json: args.json,
+            });
+            inbox_command(&engine, &command)?;
+        }
         "dev" => {
             let args = ManualDevCli::parse_from(
                 std::iter::once(command.clone()).chain(rest.iter().cloned()),
@@ -1633,24 +2876,263 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
             let engine = build_engine_from_options(&options)?;
             dev_command(&engine, &args.command)?;
         }
-        "attach" => {
-            let args = ManualAttachCli::parse_from(
+        "embeddings" => {
+            let args = ManualEmbeddingsCli::parse_from(
                 std::iter::once(command.clone()).chain(rest.iter().cloned()),
             );
             let engine = build_engine_from_options(&options)?;
-            attach_command(
+            embeddings_command(&engine, &options, &args.command)?;
+        }
+        "terminal" => {
+            let args = ManualTerminalCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            terminal_command(&engine, &args.command)?;
+        }
+        "ci" => {
+            let args = ManualCiCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            ci_command(&engine, &args.command)?;
+        }
+        "explain" => {
+            let args = ManualExplainCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            explain_or_topic_command(&engine, &args)?;
+        }
+        "examples" => {
+            let args = ManualExamplesCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            examples_command(args.area.as_deref(), args.json)?;
+        }
+        "welcome" => {
+            let engine = build_engine_from_options(&options)?;
+            welcome_command(&engine)?;
+        }
+        "setup" => {
+            let args = ManualSetupCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            setup_command(&engine, &args)?;
+        }
+        "tutorial" => {
+            let args = ManualTutorialCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            tutorial_command(&engine, &args.command)?;
+        }
+        "what" => {
+            let engine = build_engine_from_options(&options)?;
+            what_command(&engine)?;
+        }
+        "where" => {
+            let engine = build_engine_from_options(&options)?;
+            where_command(&engine)?;
+        }
+        "today" => {
+            let args = ManualDayCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            day_recap_command(&engine, args.workspace.as_ref(), 0, args.verbose, args.json)?;
+        }
+        "yesterday" => {
+            let args = ManualDayCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            day_recap_command(&engine, args.workspace.as_ref(), 1, args.verbose, args.json)?;
+        }
+        "week" => {
+            let args = ManualDayCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            dev_week_command(&engine, args.workspace.as_ref(), args.verbose, args.json)?;
+        }
+        "next" => {
+            let args = ManualDayCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            dev_next_command(&engine, args.workspace.as_ref(), 5, args.json)?;
+        }
+        "open" => {
+            let args = ManualOpenCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            open_command(&args)?;
+        }
+        "clean" => {
+            let engine = build_engine_from_options(&options)?;
+            clean_command(&engine)?;
+        }
+        "reset-demo" => {
+            let engine = build_engine_from_options(&options)?;
+            demo_reset_command(&engine, None, None, false)?;
+        }
+        "help-me" => {
+            let engine = build_engine_from_options(&options)?;
+            help_me_command(&engine)?;
+        }
+        "explain-this" | "explain-command" => {
+            explain_this_command(&rest.join(" "))?;
+        }
+        "show-map" => {
+            let args = ManualShowMapCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            show_map_command(&engine, args.workspace.as_ref(), &args.save)?;
+        }
+        "show-brain" => {
+            let engine = build_engine_from_options(&options)?;
+            stats_command(&engine, None, true, false)?;
+        }
+        "show-timeline" => {
+            let engine = build_engine_from_options(&options)?;
+            timeline_command(&engine, &[], None, 20, false)?;
+        }
+        "show-context" => {
+            let engine = build_engine_from_options(&options)?;
+            dev_context_command(
                 &engine,
-                &args.target,
-                &args.host,
-                args.port,
-                &args.upstream,
-                args.start_proxy,
-                args.workspace.as_ref(),
+                None,
+                &DevContextTarget::Generic,
+                10,
+                1600,
+                false,
+                false,
             )?;
+        }
+        "show-inbox" => {
+            let engine = build_engine_from_options(&options)?;
+            inbox_command(
+                &engine,
+                &InboxCommand::List {
+                    workspace: None,
+                    status: Some("pending".to_string()),
+                    simple: false,
+                    important: false,
+                    risky: false,
+                    json: false,
+                },
+            )?;
+        }
+        "privacy" => {
+            let args = ManualPrivacyCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            privacy_command(&engine, &args.command)?;
+        }
+        "fix" => {
+            let args = ManualFixCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            fix_command(&engine, &options, args.apply, args.json)?;
+        }
+        "redact" => {
+            let args = ManualRedactCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            redact_command(&args.command)?;
+        }
+        "config" => {
+            let args = ManualConfigCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            config_command(&engine, &args.command)?;
+        }
+        "attach" => {
+            let engine = build_engine_from_options(&options)?;
+            if rest.first().is_some_and(|value| value == "status") {
+                attach_status_command(&engine, false)?;
+            } else if rest.first().is_some_and(|value| value == "doctor") {
+                attach_doctor_command(&engine)?;
+            } else if rest.first().is_some_and(|value| value == "list") {
+                attach_list_command()?;
+            } else {
+                let args = ManualAttachCli::parse_from(
+                    std::iter::once(command.clone()).chain(rest.iter().cloned()),
+                );
+                attach_command(
+                    &engine,
+                    &args.target,
+                    &args.host,
+                    args.port,
+                    &args.upstream,
+                    args.start_proxy,
+                    args.workspace.as_ref(),
+                    args.dry_run,
+                    args.yes,
+                    args.print_config,
+                )?;
+            }
+        }
+        "detach" => {
+            let args = ManualDetachCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            detach_command(&args.target, args.dry_run, args.yes)?;
+        }
+        "watch" => {
+            let args = ManualWatchCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            public_watch_command(&engine, &args)?;
+        }
+        "context" => {
+            let args = ManualContextCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            public_context_command(&engine, &args)?;
         }
         "map" => {
             let engine = build_engine_from_options(&options)?;
-            if rest.first().is_some_and(|value| value == "compare") {
+            if rest.first().is_some_and(|value| value == "latest") {
+                map_latest_command(&engine, false)?;
+            } else if rest.first().is_some_and(|value| value == "open") {
+                map_latest_command(&engine, true)?;
+            } else if rest.first().is_some_and(|value| value == "status") {
+                map_status_command(&engine)?;
+            } else if rest.first().is_some_and(|value| value == "refresh") {
+                map_refresh_command(&engine)?;
+            } else if rest.first().is_some_and(|value| value == "export-readme") {
+                map_export_markdown_command(
+                    &engine,
+                    "README map section",
+                    ".memory.cpp/maps/readme-map.md",
+                )?;
+            } else if rest
+                .first()
+                .is_some_and(|value| value == "export-onboarding")
+            {
+                map_export_markdown_command(
+                    &engine,
+                    "Onboarding map",
+                    ".memory.cpp/maps/onboarding-map.md",
+                )?;
+            } else if rest.first().is_some_and(|value| value == "export-context") {
+                map_export_markdown_command(
+                    &engine,
+                    "AI context map",
+                    ".memory.cpp/maps/context-map.md",
+                )?;
+            } else if rest.first().is_some_and(|value| value == "changed") {
+                map_changed_command(&engine, &rest[1..])?;
+            } else if rest.first().is_some_and(|value| value == "compare") {
                 let args = ManualMapCompareCli::parse_from(
                     std::iter::once(command.clone()).chain(rest.iter().skip(1).cloned()),
                 );
@@ -1757,7 +3239,17 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
             )?;
         }
         "stop" => stop_command(&options)?,
-        "status" => status_command(&options)?,
+        "status" => {
+            let args = ManualStatusCli::parse_from(
+                std::iter::once(command.clone()).chain(rest.iter().cloned()),
+            );
+            if args.runtime {
+                status_command(&options)?;
+            } else {
+                let engine = build_engine_from_options(&options)?;
+                product_status_command(&engine, &options, args.json, args.verbose)?;
+            }
+        }
         "proxy" => {
             let args = ManualProxyCli::parse_from(
                 std::iter::once(command.clone()).chain(rest.iter().cloned()),
@@ -1877,8 +3369,45 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "edit",
         "restore",
         "import",
+        "remember",
+        "add",
+        "recall",
+        "search",
+        "explain",
+        "examples",
+        "inbox",
         "dev",
+        "embeddings",
+        "terminal",
+        "ci",
+        "welcome",
+        "setup",
+        "tutorial",
+        "what",
+        "where",
+        "today",
+        "yesterday",
+        "week",
+        "next",
+        "open",
+        "clean",
+        "reset-demo",
+        "help-me",
+        "explain-this",
+        "explain-command",
+        "show-map",
+        "show-brain",
+        "show-timeline",
+        "show-context",
+        "show-inbox",
+        "privacy",
+        "fix",
+        "redact",
+        "config",
         "attach",
+        "detach",
+        "watch",
+        "context",
         "map",
         "start",
         "stop",
@@ -1918,6 +3447,8 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
                     "hash" => EmbedderChoice::Hash,
                     "ollama" => EmbedderChoice::Ollama,
                     "openai" => EmbedderChoice::Openai,
+                    "fastembed" => EmbedderChoice::Fastembed,
+                    "onnx" | "fastembed-onnx" => EmbedderChoice::Onnx,
                     other => return Err(anyhow!("unknown embedder: {other}")),
                 };
             }
@@ -2054,6 +3585,8 @@ struct RecallCommandOptions<'a> {
     workspace: Option<&'a String>,
     kinds: &'a [MemoryKind],
     tags: &'a [String],
+    profile: Option<&'a SearchProfile>,
+    explain: bool,
     limit: usize,
     include_content: bool,
     include_inactive: bool,
@@ -2061,12 +3594,67 @@ struct RecallCommandOptions<'a> {
     json_output: bool,
 }
 
+fn apply_search_profile(
+    words: &[String],
+    kinds: &[MemoryKind],
+    tags: &[String],
+    profile: Option<&SearchProfile>,
+) -> (Vec<String>, Vec<MemoryKind>, Vec<String>) {
+    let mut query_words = words.to_vec();
+    let mut profile_kinds = kinds.to_vec();
+    let profile_tags = tags.to_vec();
+
+    match profile {
+        Some(SearchProfile::Dev) => {
+            query_words.extend(["todo", "next", "workflow", "file"].map(str::to_string));
+        }
+        Some(SearchProfile::Error) => {
+            if profile_kinds.is_empty() {
+                profile_kinds.push(MemoryKind::Bug);
+            }
+            query_words.extend(["error", "failure", "fix", "workaround"].map(str::to_string));
+        }
+        Some(SearchProfile::Decision) => {
+            if profile_kinds.is_empty() {
+                profile_kinds.push(MemoryKind::Decision);
+            }
+            query_words.extend(["why", "because", "chosen", "alternative"].map(str::to_string));
+        }
+        Some(SearchProfile::Code) => {
+            query_words.extend(["symbol", "file", "module", "implementation"].map(str::to_string));
+        }
+        Some(SearchProfile::Docs) => {
+            query_words.extend(["README", "docs", "architecture", "run"].map(str::to_string));
+        }
+        Some(SearchProfile::Test) => {
+            query_words.extend(["test", "failure", "flaky", "reproduce"].map(str::to_string));
+        }
+        Some(SearchProfile::Terminal) => {
+            query_words.extend(["terminal", "command", "shell", "exit"].map(str::to_string));
+        }
+        Some(SearchProfile::Git) => {
+            query_words.extend(["git", "commit", "branch", "diff"].map(str::to_string));
+        }
+        Some(SearchProfile::Ci) => {
+            if profile_kinds.is_empty() {
+                profile_kinds.push(MemoryKind::Bug);
+            }
+            query_words.extend(["ci", "workflow", "build", "failure"].map(str::to_string));
+        }
+        None => {}
+    }
+
+    (query_words, profile_kinds, profile_tags)
+}
+
 fn recall_command(engine: &MemoryEngine, options: RecallCommandOptions<'_>) -> Result<()> {
+    let (profile_words, profile_kinds, profile_tags) =
+        apply_search_profile(options.query, options.kinds, options.tags, options.profile);
     let mut recall_query = build_recall_query(
-        options.query,
+        &profile_words,
         options.workspace,
-        options.kinds,
-        options.tags,
+        &profile_kinds,
+        &profile_tags,
         options.limit,
         options.include_content,
         options.include_global,
@@ -2075,10 +3663,33 @@ fn recall_command(engine: &MemoryEngine, options: RecallCommandOptions<'_>) -> R
     recall_query = recall_query.include_inactive(options.include_inactive);
     let memories = engine.search(recall_query)?;
     if options.json_output {
-        println!("{}", serde_json::to_string_pretty(&memories)?);
+        if options.explain || options.profile.is_some() {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "profile": options.profile.map(|profile| format!("{profile:?}").to_ascii_lowercase()),
+                    "expanded_query": profile_words.join(" "),
+                    "kinds": profile_kinds,
+                    "tags": profile_tags,
+                    "results": memories,
+                }))?
+            );
+        } else {
+            println!("{}", serde_json::to_string_pretty(&memories)?);
+        }
     } else if memories.is_empty() {
         println!("no memories found");
     } else {
+        if options.explain || options.profile.is_some() {
+            println!(
+                "search profile: {}",
+                options
+                    .profile
+                    .map(|profile| format!("{profile:?}").to_ascii_lowercase())
+                    .unwrap_or_else(|| "default".to_string())
+            );
+            println!("expanded query: {}", profile_words.join(" "));
+        }
         for (index, item) in memories.iter().enumerate() {
             println!(
                 "{}. [{:.3} | {} | {}] {}",
@@ -2833,33 +4444,2907 @@ fn inbox_command(engine: &MemoryEngine, command: &InboxCommand) -> Result<()> {
         InboxCommand::List {
             workspace,
             status,
+            simple,
+            important,
+            risky,
             json,
         } => {
-            let items = engine.inbox(workspace.as_deref(), status.as_deref())?;
+            let mut items = engine.inbox(workspace.as_deref(), status.as_deref())?;
+            if *important {
+                items.retain(|item| inbox_confidence(item) >= 0.8);
+            }
+            if *risky {
+                items.retain(|item| detect_sensitive_reason(&item.content).is_some());
+            }
             if *json {
                 println!("{}", serde_json::to_string_pretty(&items)?);
             } else {
-                for item in items {
-                    println!("{} [{}] {}", item.id, item.status, item.reason);
+                if items.is_empty() {
+                    println!("inbox is clear");
+                } else {
+                    for item in items {
+                        if *simple {
+                            println!(
+                                "{} [{} {:.2}] {}",
+                                item.id,
+                                item.status,
+                                inbox_confidence(&item),
+                                item.content
+                            );
+                        } else {
+                            print_inbox_item(&item, false);
+                        }
+                    }
                 }
             }
         }
-        InboxCommand::Approve { id } => {
-            if engine.review_inbox(id, "approved")? {
-                println!("approved {}", id);
+        InboxCommand::Stats { workspace, json } => {
+            let items = engine.inbox(workspace.as_deref(), None)?;
+            let stats = inbox_stats(&items);
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&stats)?);
+            } else {
+                println!("candidate inbox stats");
+                println!("total: {}", stats["total"].as_u64().unwrap_or(0));
+                println!(
+                    "pending: {} | approved: {} | rejected: {}",
+                    stats["pending"].as_u64().unwrap_or(0),
+                    stats["approved"].as_u64().unwrap_or(0),
+                    stats["rejected"].as_u64().unwrap_or(0)
+                );
+                println!(
+                    "average confidence: {:.2}",
+                    stats["average_confidence"].as_f64().unwrap_or(0.0)
+                );
+                println!(
+                    "sensitive/risky: {}",
+                    stats["sensitive"].as_u64().unwrap_or(0)
+                );
+            }
+        }
+        InboxCommand::Review { workspace, json } => {
+            let item = engine
+                .inbox(workspace.as_deref(), Some("pending"))?
+                .into_iter()
+                .max_by(|left, right| inbox_confidence(left).total_cmp(&inbox_confidence(right)));
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&item)?);
+            } else if let Some(item) = item {
+                println!("candidate review");
+                print_inbox_item(&item, true);
+                println!("actions:");
+                println!("  approve: memory inbox approve {}", item.id);
+                println!("  edit:    memory inbox edit {} \"new text\"", item.id);
+                println!(
+                    "  reject:  memory inbox reject {} --reason duplicate",
+                    item.id
+                );
+                println!("  skip:    memory inbox snooze {}", item.id);
+            } else {
+                println!("inbox is clear");
+            }
+        }
+        InboxCommand::Explain { id, json } => {
+            let item = find_inbox_item(engine, id)?;
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&inbox_explanation(&item))?
+                );
+            } else {
+                print_inbox_item(&item, true);
+            }
+        }
+        InboxCommand::Edit {
+            id,
+            content,
+            reason,
+            kind,
+            confidence,
+            tags,
+            source_file,
+            source_commit,
+            status,
+            json,
+        } => {
+            let mut item = find_inbox_item(engine, id)?;
+            if let Some(content) = content {
+                item.content = content.clone();
+            }
+            if let Some(reason) = reason {
+                item.reason = reason.clone();
+            }
+            if let Some(status) = status {
+                item.status = status.clone();
+            }
+            update_inbox_metadata(
+                &mut item.metadata,
+                *kind,
+                *confidence,
+                tags,
+                source_file.as_deref(),
+                source_commit.as_deref(),
+            );
+            engine.update_inbox_entry(&item)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&item)?);
+            } else {
+                println!("updated inbox item {}", item.id);
+                print_inbox_item(&item, true);
+            }
+        }
+        InboxCommand::Approve { id } => match approve_inbox_item(engine, id, false)? {
+            Some(memory_id) => println!("approved {id} -> remembered {memory_id}"),
+            None => println!("inbox item not found: {}", id),
+        },
+        InboxCommand::Reject { id, reason } => {
+            if engine.review_inbox(id, "rejected")? {
+                if let Some(reason) = reason {
+                    println!("rejected {} ({})", id, reason);
+                } else {
+                    println!("rejected {}", id);
+                }
             } else {
                 println!("inbox item not found: {}", id);
             }
         }
-        InboxCommand::Reject { id } => {
-            if engine.review_inbox(id, "rejected")? {
-                println!("rejected {}", id);
+        InboxCommand::RejectAll {
+            workspace,
+            yes,
+            json,
+        } => {
+            let items = engine.inbox(workspace.as_deref(), Some("pending"))?;
+            if !*yes {
+                println!(
+                    "{} pending item(s) would be rejected. Re-run with --yes.",
+                    items.len()
+                );
+                return Ok(());
+            }
+            let mut rejected = 0usize;
+            for item in &items {
+                if engine.review_inbox(&item.id, "rejected")? {
+                    rejected += 1;
+                }
+            }
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"rejected": rejected}))?
+                );
             } else {
-                println!("inbox item not found: {}", id);
+                println!("rejected {rejected} inbox item(s)");
+            }
+        }
+        InboxCommand::Snooze { id } => {
+            if engine.review_inbox(id, "snoozed")? {
+                println!("snoozed {id}");
+            } else {
+                println!("inbox item not found: {id}");
+            }
+        }
+        InboxCommand::Merge { a, b } => {
+            let mut first = find_inbox_item(engine, a)?;
+            let second = find_inbox_item(engine, b)?;
+            first.content = format!("{}\n\n{}", first.content, second.content);
+            first.reason = format!("merged candidates: {}; {}", first.reason, second.reason);
+            engine.update_inbox_entry(&first)?;
+            let _ = engine.review_inbox(b, "merged");
+            println!("merged {b} into {a}");
+        }
+        InboxCommand::Similar { id, json } => {
+            let item = find_inbox_item(engine, id)?;
+            let all = engine.inbox(Some(&item.scope), None)?;
+            let needle = item.content.to_ascii_lowercase();
+            let similar = all
+                .into_iter()
+                .filter(|candidate| candidate.id != item.id)
+                .filter(|candidate| {
+                    let lower = candidate.content.to_ascii_lowercase();
+                    lower.split_whitespace().any(|word| needle.contains(word))
+                })
+                .take(10)
+                .collect::<Vec<_>>();
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&similar)?);
+            } else {
+                println!("similar candidates:");
+                for candidate in similar {
+                    println!("  - {} {}", candidate.id, candidate.content);
+                }
+            }
+        }
+        InboxCommand::Source { id } => {
+            let item = find_inbox_item(engine, id)?;
+            let explanation = inbox_explanation(&item);
+            println!(
+                "source file: {}",
+                explanation["source_file"].as_str().unwrap_or("unknown")
+            );
+            println!(
+                "source commit: {}",
+                explanation["source_commit"].as_str().unwrap_or("unknown")
+            );
+            println!("why captured: {}", item.reason);
+        }
+        InboxCommand::Preview { id } => {
+            let item = find_inbox_item(engine, id)?;
+            print_inbox_item(&item, true);
+            println!("what this helps with: future search, dev resume, maps, and AI context packs");
+            println!(
+                "safe to store: {}",
+                if detect_sensitive_reason(&item.content).is_some() {
+                    "review first"
+                } else {
+                    "likely yes"
+                }
+            );
+        }
+        InboxCommand::Rules { command } => inbox_rules_command(engine, command)?,
+        InboxCommand::Export { output, workspace } => {
+            let items = engine.inbox(workspace.as_deref(), None)?;
+            fs::write(output, serde_json::to_string_pretty(&items)?)?;
+            println!("exported inbox to {}", output.display());
+        }
+        InboxCommand::ClearRejected { yes } => {
+            if !*yes {
+                println!("Rejected entries are kept as audit history. Re-run with --yes to mark this acknowledged.");
+            } else {
+                println!("Rejected entries are retained for auditability in this release.");
+            }
+        }
+        InboxCommand::ApproveAll {
+            workspace,
+            confidence_above,
+            dry_run,
+            json,
+        } => {
+            let items = engine.inbox(workspace.as_deref(), Some("pending"))?;
+            let eligible = items
+                .into_iter()
+                .filter(|item| inbox_confidence(item) >= *confidence_above)
+                .collect::<Vec<_>>();
+            let mut approved = Vec::new();
+            if !*dry_run {
+                for item in &eligible {
+                    if let Some(memory_id) = approve_inbox_item(engine, &item.id, true)? {
+                        approved.push(json!({ "inbox_id": item.id, "memory_id": memory_id }));
+                    }
+                }
+            }
+            let report = json!({
+                "threshold": confidence_above,
+                "dry_run": dry_run,
+                "eligible": eligible,
+                "approved": approved,
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else if *dry_run {
+                println!(
+                    "{} inbox item(s) would be approved at confidence >= {:.2}",
+                    report["eligible"].as_array().map(Vec::len).unwrap_or(0),
+                    confidence_above
+                );
+            } else {
+                println!("approved {} inbox item(s)", approved.len());
             }
         }
     }
     Ok(())
+}
+
+fn inbox_rules_command(engine: &MemoryEngine, command: &Option<InboxRulesCommand>) -> Result<()> {
+    let path = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("inbox-rules.json");
+    match command {
+        Some(InboxRulesCommand::Add {
+            pattern,
+            action,
+            confidence_above,
+        }) => {
+            let mut rules = load_inbox_rules(&path)?;
+            let id = format!("rule-{}", rules.len() + 1);
+            rules.push(json!({
+                "id": id,
+                "pattern": pattern,
+                "action": action,
+                "confidence_above": confidence_above,
+                "created_at": Utc::now(),
+            }));
+            save_inbox_rules(&path, &rules)?;
+            println!("added inbox rule for pattern {pattern}");
+        }
+        Some(InboxRulesCommand::List { json }) => {
+            let rules = load_inbox_rules(&path)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&rules)?);
+            } else if rules.is_empty() {
+                println!("no custom inbox rules yet");
+                println!("defaults: never store secrets, review sensitive candidates, approve only by policy.");
+            } else {
+                println!("inbox rules:");
+                for rule in rules {
+                    println!(
+                        "  - {}: {} -> {}",
+                        rule["id"].as_str().unwrap_or("rule"),
+                        rule["pattern"].as_str().unwrap_or("*"),
+                        rule["action"].as_str().unwrap_or("review")
+                    );
+                }
+            }
+        }
+        Some(InboxRulesCommand::Remove { id }) => {
+            let mut rules = load_inbox_rules(&path)?;
+            let before = rules.len();
+            rules.retain(|rule| rule["id"].as_str() != Some(id.as_str()));
+            save_inbox_rules(&path, &rules)?;
+            println!(
+                "removed {} inbox rule(s)",
+                before.saturating_sub(rules.len())
+            );
+        }
+        None => {
+            println!("inbox rules:");
+            println!("- high-confidence low-risk candidates can be approved with memory inbox approve-all --confidence-above 0.9");
+            println!("- sensitive-looking candidates should be edited or rejected");
+            println!("- secrets and ignored paths should never be stored");
+            println!("- automatic writes stay approval-gated unless policy allows them");
+            println!("custom rules: memory inbox rules add \"docs/**\" --action review");
+        }
+    }
+    Ok(())
+}
+
+fn load_inbox_rules(path: &Path) -> Result<Vec<Value>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
+}
+
+fn save_inbox_rules(path: &Path, rules: &[Value]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_string_pretty(rules)?)?;
+    Ok(())
+}
+
+fn find_inbox_item(engine: &MemoryEngine, id: &str) -> Result<memory_core::InboxEntry> {
+    engine
+        .inbox(None, None)?
+        .into_iter()
+        .find(|item| item.id == id)
+        .ok_or_else(|| anyhow!("inbox item not found: {id}"))
+}
+
+fn inbox_stats(items: &[memory_core::InboxEntry]) -> Value {
+    let mut by_status = HashMap::<String, usize>::new();
+    let mut confidence_sum = 0.0f64;
+    let mut confidence_count = 0usize;
+    let mut sensitive = 0usize;
+    for item in items {
+        *by_status.entry(item.status.clone()).or_default() += 1;
+        let confidence = inbox_confidence(item);
+        if confidence > 0.0 {
+            confidence_sum += confidence as f64;
+            confidence_count += 1;
+        }
+        if detect_sensitive_reason(&item.content).is_some()
+            || item
+                .metadata
+                .pointer("/memory_cpp/sensitivity")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value != "low")
+        {
+            sensitive += 1;
+        }
+    }
+    json!({
+        "total": items.len(),
+        "pending": by_status.get("pending").copied().unwrap_or(0),
+        "approved": by_status.get("approved").copied().unwrap_or(0),
+        "rejected": by_status.get("rejected").copied().unwrap_or(0),
+        "by_status": by_status,
+        "average_confidence": if confidence_count == 0 { 0.0 } else { confidence_sum / confidence_count as f64 },
+        "sensitive": sensitive,
+    })
+}
+
+fn inbox_explanation(item: &memory_core::InboxEntry) -> Value {
+    json!({
+        "id": item.id,
+        "workspace": item.scope,
+        "status": item.status,
+        "suggested_memory": item.content,
+        "why_captured": item.reason,
+        "confidence": inbox_confidence(item),
+        "kind": inbox_kind(item).as_str(),
+        "source_file": item.metadata.pointer("/memory_cpp/source/source_file").and_then(Value::as_str)
+            .or_else(|| item.metadata.pointer("/memory_cpp/source_file").and_then(Value::as_str)),
+        "source_commit": item.metadata.pointer("/memory_cpp/source/source_commit").and_then(Value::as_str)
+            .or_else(|| item.metadata.pointer("/memory_cpp/source_commit").and_then(Value::as_str)),
+        "risk_or_sensitivity": detect_sensitive_reason(&item.content).unwrap_or("low"),
+        "recommended_action": if inbox_confidence(item) >= 0.9 {
+            "approve"
+        } else if detect_sensitive_reason(&item.content).is_some() {
+            "edit or reject"
+        } else {
+            "review"
+        },
+        "metadata": item.metadata,
+    })
+}
+
+fn print_inbox_item(item: &memory_core::InboxEntry, verbose: bool) {
+    let explanation = inbox_explanation(item);
+    println!(
+        "{} [{}] {}",
+        item.id,
+        item.status,
+        explanation["suggested_memory"].as_str().unwrap_or("")
+    );
+    println!(
+        "  why: {} | confidence {:.2} | kind {}",
+        explanation["why_captured"]
+            .as_str()
+            .unwrap_or("captured candidate"),
+        explanation["confidence"].as_f64().unwrap_or(0.0),
+        explanation["kind"].as_str().unwrap_or("note")
+    );
+    if verbose {
+        println!(
+            "  source: file={} commit={}",
+            explanation["source_file"].as_str().unwrap_or("unknown"),
+            explanation["source_commit"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "  risk: {} | recommended action: {}",
+            explanation["risk_or_sensitivity"].as_str().unwrap_or("low"),
+            explanation["recommended_action"]
+                .as_str()
+                .unwrap_or("review")
+        );
+    }
+}
+
+fn inbox_confidence(item: &memory_core::InboxEntry) -> f32 {
+    item.metadata
+        .pointer("/memory_cpp/confidence")
+        .and_then(Value::as_f64)
+        .or_else(|| {
+            item.metadata
+                .pointer("/memory_cpp/candidate/confidence")
+                .and_then(Value::as_f64)
+        })
+        .unwrap_or(0.5) as f32
+}
+
+fn inbox_kind(item: &memory_core::InboxEntry) -> MemoryKind {
+    item.metadata
+        .pointer("/memory_cpp/candidate_kind")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            item.metadata
+                .pointer("/memory_cpp/candidate/kind")
+                .and_then(Value::as_str)
+        })
+        .and_then(|value| MemoryKind::from_str(value).ok())
+        .unwrap_or_else(|| classify_memory_kind(&item.content))
+}
+
+fn classify_memory_kind(content: &str) -> MemoryKind {
+    let lower = content.to_ascii_lowercase();
+    if ["bug", "fix", "failure", "failed", "error", "regression"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        MemoryKind::Bug
+    } else if ["decision", "because", "chosen", "default", "alternative"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        MemoryKind::Decision
+    } else if ["todo", "next", "fixme", "plan"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        MemoryKind::Task
+    } else if ["run ", "command", "workflow", "build", "test"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        MemoryKind::Workflow
+    } else {
+        MemoryKind::Note
+    }
+}
+
+fn update_inbox_metadata(
+    metadata: &mut Value,
+    kind: Option<MemoryKind>,
+    confidence: Option<f32>,
+    tags: &[String],
+    source_file: Option<&str>,
+    source_commit: Option<&str>,
+) {
+    if !metadata.is_object() {
+        *metadata = json!({});
+    }
+    if metadata.get("memory_cpp").is_none() {
+        metadata["memory_cpp"] = json!({});
+    }
+    if let Some(kind) = kind {
+        metadata["memory_cpp"]["candidate_kind"] = json!(kind.as_str());
+    }
+    if let Some(confidence) = confidence {
+        metadata["memory_cpp"]["confidence"] = json!(confidence.clamp(0.0, 1.0));
+    }
+    if !tags.is_empty() {
+        metadata["memory_cpp"]["tags"] = json!(tags);
+    }
+    if source_file.is_some() || source_commit.is_some() {
+        if metadata["memory_cpp"].get("source").is_none() {
+            metadata["memory_cpp"]["source"] = json!({});
+        }
+        if let Some(source_file) = source_file {
+            metadata["memory_cpp"]["source"]["source_file"] = json!(source_file);
+        }
+        if let Some(source_commit) = source_commit {
+            metadata["memory_cpp"]["source"]["source_commit"] = json!(source_commit);
+        }
+    }
+}
+
+fn approve_inbox_item(engine: &MemoryEngine, id: &str, missing_ok: bool) -> Result<Option<String>> {
+    let item = match find_inbox_item(engine, id) {
+        Ok(item) => item,
+        Err(err) if missing_ok => {
+            let _ = err;
+            return Ok(None);
+        }
+        Err(err) => return Err(err),
+    };
+    let kind = inbox_kind(&item);
+    let mut memory = NewMemory::new(item.content.clone())
+        .scope(item.scope.clone())
+        .kind(kind.as_str())
+        .confidence(inbox_confidence(&item))
+        .metadata(json!({
+            "approved_from_inbox": item.id,
+            "candidate_reason": item.reason,
+            "candidate_metadata": item.metadata,
+        }))
+        .status(MemoryStatus::Active)
+        .source(MemorySource {
+            source_type: Some("inbox_candidate".to_string()),
+            source_app: Some("memory.cpp".to_string()),
+            source: Some(item.reason.clone()),
+            source_file: item
+                .metadata
+                .pointer("/memory_cpp/source/source_file")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            source_line: None,
+            source_commit: item
+                .metadata
+                .pointer("/memory_cpp/source/source_commit")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            source_conversation_id: None,
+            source_message_id: None,
+            created_by: Some("inbox".to_string()),
+            reliability: Some(inbox_confidence(&item)),
+        });
+    if let Some(tags) = item
+        .metadata
+        .pointer("/memory_cpp/tags")
+        .and_then(Value::as_array)
+    {
+        memory = memory.tags(
+            tags.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>(),
+        );
+    }
+    let stored = engine.remember(memory)?;
+    engine.review_inbox(id, "approved")?;
+    Ok(Some(stored.id))
+}
+
+fn embeddings_command(
+    engine: &MemoryEngine,
+    options: &EngineOptions,
+    command: &EmbeddingsCommand,
+) -> Result<()> {
+    match command {
+        EmbeddingsCommand::Status { json } => {
+            let config = load_app_config(engine.store_path())?;
+            let report = json!({
+                "active_provider": engine.embedder_name(),
+                "configured_provider": config.embedding.provider,
+                "endpoint": config.embedding.endpoint,
+                "model": config.embedding.model,
+                "dimensions": config.embedding.dimensions.unwrap_or(options.dimensions),
+                "store": engine.store_path(),
+                "migrated_at": config.embedding.migrated_at,
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("embedding status");
+                println!(
+                    "active provider: {}",
+                    report["active_provider"].as_str().unwrap_or("hash")
+                );
+                println!(
+                    "configured provider: {}",
+                    report["configured_provider"].as_str().unwrap_or("hash")
+                );
+                println!(
+                    "dimensions: {}",
+                    report["dimensions"].as_u64().unwrap_or(384)
+                );
+            }
+        }
+        EmbeddingsCommand::List { json } => {
+            let providers = embedding_provider_registry();
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&providers)?);
+            } else {
+                println!("embedding providers:");
+                for provider in providers.as_array().cloned().unwrap_or_default() {
+                    println!(
+                        "  - {} ({}) {}",
+                        provider["name"].as_str().unwrap_or("provider"),
+                        provider["status"].as_str().unwrap_or("available"),
+                        provider["description"].as_str().unwrap_or("")
+                    );
+                }
+            }
+        }
+        EmbeddingsCommand::Set {
+            provider,
+            endpoint,
+            model,
+            dimensions,
+        } => {
+            let mut config = load_app_config(engine.store_path())?;
+            config.embedding.provider = Some(provider.provider_name().to_string());
+            if let Some(endpoint) = endpoint {
+                config.embedding.endpoint = Some(endpoint.clone());
+            }
+            if let Some(model) = model {
+                config.embedding.model = Some(model.clone());
+            }
+            if let Some(dimensions) = dimensions {
+                config.embedding.dimensions = Some(*dimensions);
+            }
+            save_app_config(engine.store_path(), &config)?;
+            println!(
+                "embedding provider set to {} for future commands",
+                provider.provider_name()
+            );
+        }
+        EmbeddingsCommand::Migrate {
+            provider,
+            dry_run,
+            json,
+        } => {
+            let memories = engine.all_memories(None, true)?;
+            let report = json!({
+                "to": provider.provider_name(),
+                "dry_run": dry_run,
+                "memories_seen": memories.len(),
+                "note": "local stores keep old vectors until memories are rewritten; this migration switches the active provider and future writes use it",
+            });
+            if !*dry_run {
+                let mut config = load_app_config(engine.store_path())?;
+                config.embedding.provider = Some(provider.provider_name().to_string());
+                config.embedding.dimensions = Some(options.dimensions);
+                config.embedding.migrated_at = Some(Utc::now());
+                save_app_config(engine.store_path(), &config)?;
+            }
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "embedding migration {} to {} across {} memory record(s)",
+                    if *dry_run { "planned" } else { "recorded" },
+                    provider.provider_name(),
+                    report["memories_seen"].as_u64().unwrap_or(0)
+                );
+                println!("{}", report["note"].as_str().unwrap_or(""));
+            }
+        }
+        EmbeddingsCommand::Doctor { json } => {
+            let config = load_app_config(engine.store_path())?;
+            let provider = config
+                .embedding
+                .provider
+                .clone()
+                .unwrap_or_else(|| engine.embedder_name().to_string());
+            let ollama_ok = check_ollama("http://localhost:11434").unwrap_or(false);
+            let report = json!({
+                "provider": provider,
+                "dimensions": config.embedding.dimensions.unwrap_or(options.dimensions),
+                "ollama_reachable": ollama_ok,
+                "low_ram_safe": true,
+                "warnings": embedding_warnings(&config, options, ollama_ok),
+                "recommendation": "Use hash for lowest RAM, fastembed for local semantic recall, ollama when a local model server is already running."
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("embedding doctor");
+                println!(
+                    "provider: {}",
+                    report["provider"].as_str().unwrap_or("hash")
+                );
+                println!("low-RAM safe: yes");
+                for warning in report["warnings"].as_array().into_iter().flatten() {
+                    println!("- {}", warning.as_str().unwrap_or("warning"));
+                }
+                println!("{}", report["recommendation"].as_str().unwrap_or(""));
+            }
+        }
+        EmbeddingsCommand::Refresh { dry_run, json } => {
+            let count = engine.all_memories(None, true)?.len();
+            let report = json!({
+                "dry_run": dry_run,
+                "memories_seen": count,
+                "note": "refresh is lightweight in this release; rewrite or migration keeps old vectors until memories are touched"
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "embedding refresh {} for {} memory record(s)",
+                    if *dry_run { "planned" } else { "checked" },
+                    count
+                );
+                println!("{}", report["note"].as_str().unwrap_or(""));
+            }
+        }
+        EmbeddingsCommand::Benchmark { json } => {
+            let sample = "memory.cpp helps your repo remember what happened";
+            let started = std::time::Instant::now();
+            let vector = HashEmbedder::new(options.dimensions).embed(sample)?;
+            let elapsed = started.elapsed().as_millis();
+            let report = json!({
+                "provider": engine.embedder_name(),
+                "sample": sample,
+                "dimensions": vector.len(),
+                "elapsed_ms": elapsed,
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "{} dimensions from {} in {}ms",
+                    vector.len(),
+                    engine.embedder_name(),
+                    elapsed
+                );
+            }
+        }
+        EmbeddingsCommand::Compare { left, right, json } => {
+            let left = left.as_ref().unwrap_or(&EmbedderChoice::Hash);
+            let right = right.as_ref().unwrap_or(&EmbedderChoice::Fastembed);
+            let report = json!({
+                "left": left.provider_name(),
+                "right": right.provider_name(),
+                "note": "compare records provider intent in this release; run migrate --dry-run before switching stores"
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("{} vs {}", left.provider_name(), right.provider_name());
+                println!("{}", report["note"].as_str().unwrap_or(""));
+            }
+        }
+        EmbeddingsCommand::Explain => {
+            println!("embedding providers");
+            println!("hash: stable, tiny, offline, low-RAM default.");
+            println!("ollama: beta, local server required, useful when Ollama is already running.");
+            println!("openai: beta, OpenAI-compatible endpoint, opt-in API key.");
+            println!("fastembed/fastembed-onnx: experimental provider intent in this CLI; no bundled ONNX Runtime is claimed here.");
+            println!("try: memory embeddings status");
+        }
+    }
+    Ok(())
+}
+
+fn embedding_warnings(config: &AppConfig, options: &EngineOptions, ollama_ok: bool) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if config.embedding.provider.as_deref() == Some("ollama") && !ollama_ok {
+        warnings
+            .push("Ollama provider is configured but localhost:11434 is not reachable".to_string());
+    }
+    if let Some(dimensions) = config.embedding.dimensions {
+        if dimensions != options.dimensions {
+            warnings.push(format!(
+                "configured dimensions ({dimensions}) differ from active dimensions ({})",
+                options.dimensions
+            ));
+        }
+    }
+    if config.embedding.migrated_at.is_none() {
+        warnings.push("no embedding migration timestamp recorded yet".to_string());
+    }
+    warnings
+}
+
+fn embedding_provider_registry() -> Value {
+    json!([
+        {
+            "name": "hash",
+            "status": "built-in",
+            "description": "deterministic offline lexical vectors; default and zero setup"
+        },
+        {
+            "name": "fastembed",
+            "status": "built-in-local",
+            "description": "local FastEmbed/ONNX-style semantic hashing backend for zero-key semantic recall"
+        },
+        {
+            "name": "ollama",
+            "status": "http",
+            "description": "uses local Ollama embeddings such as nomic-embed-text"
+        },
+        {
+            "name": "openai",
+            "status": "http",
+            "description": "OpenAI-compatible embedding API using MEMORY_CPP_OPENAI_API_KEY by default"
+        }
+    ])
+}
+
+fn terminal_command(engine: &MemoryEngine, command: &TerminalCommand) -> Result<()> {
+    match command {
+        TerminalCommand::Status { json } => {
+            let path = terminal_log_path(engine)?;
+            let paused = terminal_paused(engine)?;
+            let entries = read_terminal_entries(engine, 200)?;
+            let failures = entries.iter().filter(|entry| entry.exit_code != 0).count();
+            let report = json!({
+                "enabled": path.exists(),
+                "paused": paused,
+                "log": path,
+                "commands": entries.len(),
+                "failures": failures,
+                "last_success": entries.iter().find(|entry| entry.exit_code == 0),
+                "last_failure": entries.iter().find(|entry| entry.exit_code != 0),
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("terminal memory status");
+                println!("enabled: {}", report["enabled"]);
+                println!("paused: {paused}");
+                println!("commands recorded: {}", entries.len());
+                println!("failures recorded: {failures}");
+                println!("next: memory terminal search \"how did I run tests?\"");
+            }
+        }
+        TerminalCommand::Enable { shell, json } => {
+            let path = terminal_log_path(engine)?;
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            OpenOptions::new().create(true).append(true).open(&path)?;
+            let shell_name = shell.clone().unwrap_or_else(|| "powershell".to_string());
+            set_terminal_paused(engine, false)?;
+            let hook = terminal_shell_hook(&shell_name);
+            let report = json!({ "log": path, "shell": shell_name, "hook": hook });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("terminal memory enabled at {}", path.display());
+                println!("optional shell hook:");
+                println!("{hook}");
+            }
+        }
+        TerminalCommand::Record {
+            command,
+            exit_code,
+            cwd,
+            duration_ms,
+        } => {
+            if terminal_paused(engine)? {
+                println!("terminal memory is paused; command not recorded");
+                return Ok(());
+            }
+            let path = terminal_log_path(engine)?;
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let cwd_path = cwd.clone().unwrap_or(env::current_dir()?);
+            let git_branch = git_repo_root(&cwd_path)
+                .and_then(|root| git_stdout(&root, &["branch", "--show-current"]).ok())
+                .filter(|branch| !branch.trim().is_empty());
+            let entry = TerminalEntry {
+                recorded_at: Utc::now(),
+                command: redact_command_line(command),
+                exit_code: *exit_code,
+                cwd: cwd_path.display().to_string(),
+                git_branch,
+                duration_ms: *duration_ms,
+            };
+            let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
+            writeln!(file, "{}", serde_json::to_string(&entry)?)?;
+            println!("recorded terminal command");
+        }
+        TerminalCommand::Commands { limit, json } => {
+            let entries = read_terminal_entries(engine, *limit)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&entries)?);
+            } else if entries.is_empty() {
+                println!("no terminal commands recorded yet");
+            } else {
+                for entry in entries {
+                    println!(
+                        "{} [{}{}] {}",
+                        entry.recorded_at.to_rfc3339(),
+                        entry.exit_code,
+                        entry
+                            .git_branch
+                            .as_ref()
+                            .map(|branch| format!(" {branch}"))
+                            .unwrap_or_default(),
+                        entry.command
+                    );
+                }
+            }
+        }
+        TerminalCommand::LastError { json } => {
+            let entry = read_terminal_entries(engine, 200)?
+                .into_iter()
+                .find(|entry| entry.exit_code != 0);
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&entry)?);
+            } else if let Some(entry) = entry {
+                println!(
+                    "last failed command [{}]: {}",
+                    entry.exit_code, entry.command
+                );
+                println!("cwd: {}", entry.cwd);
+                if let Some(branch) = entry.git_branch {
+                    println!("branch: {branch}");
+                }
+            } else {
+                println!("no failed terminal command recorded");
+            }
+        }
+        TerminalCommand::Search { query, limit, json } => {
+            let entries = terminal_query_entries(engine, query, *limit)?
+                .into_iter()
+                .take(*limit)
+                .collect::<Vec<_>>();
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&entries)?);
+            } else if entries.is_empty() {
+                println!("no terminal command matched {query}");
+            } else {
+                for entry in entries {
+                    println!(
+                        "{} [{}{}] {}",
+                        entry.recorded_at,
+                        entry.exit_code,
+                        entry
+                            .git_branch
+                            .as_ref()
+                            .map(|branch| format!(" {branch}"))
+                            .unwrap_or_default(),
+                        entry.command
+                    );
+                }
+            }
+        }
+        TerminalCommand::Suggest { query, limit, json } => {
+            let query = query
+                .clone()
+                .unwrap_or_else(|| "tests build dev server".to_string());
+            let entries = terminal_query_entries(engine, &query, *limit)?;
+            let suggestions = if entries.is_empty() {
+                infer_run_commands(&env::current_dir()?)
+                    .into_iter()
+                    .take(*limit)
+                    .collect::<Vec<_>>()
+            } else {
+                entries
+                    .into_iter()
+                    .map(|entry| entry.command)
+                    .take(*limit)
+                    .collect::<Vec<_>>()
+            };
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&suggestions)?);
+            } else if suggestions.is_empty() {
+                println!("no command suggestions yet");
+                println!("try: memory terminal record --command \"cargo test\" --exit-code 0");
+            } else {
+                println!("terminal command suggestions:");
+                for command in suggestions {
+                    println!("  - {command}");
+                }
+            }
+        }
+        TerminalCommand::Pause { json } => {
+            set_terminal_paused(engine, true)?;
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"paused": true}))?
+                );
+            } else {
+                println!("terminal memory paused");
+            }
+        }
+        TerminalCommand::Resume { json } => {
+            set_terminal_paused(engine, false)?;
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"paused": false}))?
+                );
+            } else {
+                println!("terminal memory resumed");
+            }
+        }
+        TerminalCommand::Purge { yes } => {
+            if !*yes {
+                println!("This deletes terminal command memory. Re-run with --yes to confirm.");
+                return Ok(());
+            }
+            let path = terminal_log_path(engine)?;
+            if path.exists() {
+                fs::remove_file(&path)?;
+            }
+            println!("terminal command memory purged");
+        }
+        TerminalCommand::Export { output } => {
+            let entries = read_terminal_entries(engine, usize::MAX)?;
+            fs::write(output, serde_json::to_string_pretty(&entries)?)?;
+            println!("exported terminal memory to {}", output.display());
+        }
+        TerminalCommand::InstallShell { shell, json } => {
+            let shell = shell.clone().unwrap_or_else(|| "powershell".to_string());
+            let hook = terminal_shell_hook(&shell);
+            let report = json!({
+                "shell": shell,
+                "hook": hook,
+                "note": "opt-in shell integration; paste into your shell profile if you want command capture"
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("shell integration snippet for {shell}:");
+                println!("{hook}");
+                println!("Terminal memory is opt-in and stays local.");
+            }
+        }
+        TerminalCommand::Privacy { json } => {
+            let path = terminal_log_path(engine)?;
+            let report = json!({
+                "opt_in": true,
+                "log": path,
+                "paused": terminal_paused(engine)?,
+                "redaction": "secret-looking arguments are replaced before writing",
+                "purge": "memory terminal purge --yes",
+                "export": "memory terminal export terminal-memory.json",
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("terminal memory privacy");
+                println!("opt-in: yes");
+                println!("stored locally at: {}", path.display());
+                println!("redaction: secret-looking arguments are replaced");
+                println!("pause: memory terminal pause");
+                println!("purge: memory terminal purge --yes");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn terminal_shell_hook(shell_name: &str) -> &'static str {
+    let shell = shell_name.to_ascii_lowercase();
+    if shell.contains("power") {
+        "function Invoke-MemoryCommand { param([string]$Command) $started=Get-Date; iex $Command; $code=$LASTEXITCODE; memory terminal record --command $Command --exit-code $code --cwd (Get-Location).Path }"
+    } else if shell.contains("fish") {
+        "function memory_record_last --on-event fish_postexec; memory terminal record --command \"$argv\" --exit-code $status --cwd \"$PWD\"; end"
+    } else {
+        "memory terminal record --command \"$BASH_COMMAND\" --exit-code \"$?\" --cwd \"$PWD\""
+    }
+}
+
+fn redact_command_line(command: &str) -> String {
+    command
+        .split_whitespace()
+        .map(|part| {
+            let lower = part.to_ascii_lowercase();
+            if lower.contains("token=")
+                || lower.contains("password=")
+                || lower.contains("secret=")
+                || lower.starts_with("sk-")
+                || lower.starts_with("ghp_")
+            {
+                "[REDACTED]".to_string()
+            } else {
+                part.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn terminal_log_path(engine: &MemoryEngine) -> Result<PathBuf> {
+    Ok(engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("terminal")
+        .join("commands.jsonl"))
+}
+
+fn terminal_state_path(engine: &MemoryEngine) -> Result<PathBuf> {
+    Ok(engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("terminal")
+        .join("state.json"))
+}
+
+fn terminal_paused(engine: &MemoryEngine) -> Result<bool> {
+    let path = terminal_state_path(engine)?;
+    if !path.exists() {
+        return Ok(false);
+    }
+    let state: Value = serde_json::from_str(&fs::read_to_string(path)?)?;
+    Ok(state
+        .get("paused")
+        .and_then(Value::as_bool)
+        .unwrap_or(false))
+}
+
+fn set_terminal_paused(engine: &MemoryEngine, paused: bool) -> Result<()> {
+    let path = terminal_state_path(engine)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(
+        path,
+        serde_json::to_string_pretty(&json!({
+            "paused": paused,
+            "updated_at": Utc::now(),
+        }))?,
+    )?;
+    Ok(())
+}
+
+fn read_terminal_entries(engine: &MemoryEngine, limit: usize) -> Result<Vec<TerminalEntry>> {
+    let path = terminal_log_path(engine)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let file = File::open(path)?;
+    let mut entries = io::BufReader::new(file)
+        .lines()
+        .map_while(|line| line.ok())
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str::<TerminalEntry>(&line).ok())
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.recorded_at));
+    entries.truncate(limit.max(1));
+    Ok(entries)
+}
+
+fn terminal_query_entries(
+    engine: &MemoryEngine,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<TerminalEntry>> {
+    let lower = query.to_ascii_lowercase();
+    let expanded = if lower.contains("run tests") || lower.contains("test") {
+        vec!["test", "cargo test", "npm test", "pytest", "go test"]
+    } else if lower.contains("dev server") || lower.contains("start dev") {
+        vec!["dev", "serve", "start", "run"]
+    } else if lower.contains("build") || lower.contains("release") {
+        vec!["build", "release", "cargo build", "npm run build"]
+    } else {
+        vec![lower.as_str()]
+    };
+    Ok(read_terminal_entries(engine, 500)?
+        .into_iter()
+        .filter(|entry| {
+            let command = entry.command.to_ascii_lowercase();
+            expanded.iter().any(|needle| command.contains(needle))
+        })
+        .take(limit.max(1))
+        .collect())
+}
+
+fn ci_command(engine: &MemoryEngine, command: &CiCommand) -> Result<()> {
+    match command {
+        CiCommand::Ingest {
+            path,
+            workspace,
+            json,
+        } => {
+            let scope = required_workspace(engine, workspace.as_ref())?;
+            let raw = fs::read_to_string(path)
+                .with_context(|| format!("failed to read CI log {}", path.display()))?;
+            let failures = parse_ci_failures(&raw);
+            let mut stored = Vec::new();
+            for failure in &failures {
+                let memory = engine.remember(
+                    NewMemory::new(failure.clone())
+                        .scope(scope.clone())
+                        .kind("bug")
+                        .confidence(0.82)
+                        .tag("ci")
+                        .tag("test-failure")
+                        .metadata(json!({ "source": path, "importer": "ci-ingest" }))
+                        .source(MemorySource {
+                            source_type: Some("ci_log".to_string()),
+                            source_app: Some("memory.cpp".to_string()),
+                            source: Some(path.display().to_string()),
+                            source_file: Some(path.display().to_string()),
+                            source_line: None,
+                            source_commit: None,
+                            source_conversation_id: None,
+                            source_message_id: None,
+                            created_by: Some("ci".to_string()),
+                            reliability: Some(0.82),
+                        }),
+                )?;
+                stored.push(memory.id);
+            }
+            let report =
+                json!({ "workspace": scope, "path": path, "failures": failures, "stored": stored });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("ingested {} CI failure memory item(s)", stored.len());
+            }
+        }
+        CiCommand::ExplainFailure {
+            query,
+            workspace,
+            limit,
+            json,
+        } => {
+            let scope = required_workspace(engine, workspace.as_ref())?;
+            let query = query
+                .clone()
+                .unwrap_or_else(|| "ci failure test error previous fix".to_string());
+            let memories = engine.search(
+                RecallQuery::new(query)
+                    .workspace(scope)
+                    .kind(MemoryKind::Bug)
+                    .limit(*limit)
+                    .include_content(true),
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&memories)?);
+            } else if memories.is_empty() {
+                println!("no CI failure memory found");
+            } else {
+                println!("CI failure explanation:");
+                for item in memories {
+                    println!("  - {}", item.memory.summary);
+                    println!("    {}", item.reason);
+                }
+            }
+        }
+        CiCommand::Last { workspace, json } => {
+            let memories = ci_memory_search(engine, workspace.as_ref(), "ci failure", 1)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&memories)?);
+            } else if let Some(item) = memories.first() {
+                println!("last CI failure: {}", item.memory.summary);
+                println!("next: memory ci explain-failure");
+            } else {
+                println!("no CI failure memory recorded yet");
+                println!("try: memory ci ingest ./ci.log");
+            }
+        }
+        CiCommand::Similar {
+            query,
+            workspace,
+            limit,
+            json,
+        } => {
+            let query = query.clone().unwrap_or_else(|| "ci failure".to_string());
+            let memories = ci_memory_search(engine, workspace.as_ref(), &query, *limit)?;
+            emit_memory_search("similar CI failures", &memories, *json)?;
+        }
+        CiCommand::Flaky { workspace, json } => {
+            let memories =
+                ci_memory_search(engine, workspace.as_ref(), "flaky intermittent timeout", 12)?;
+            emit_memory_search("flaky CI memory", &memories, *json)?;
+        }
+        CiCommand::KnownFailures { workspace, json } => {
+            let memories = ci_memory_search(
+                engine,
+                workspace.as_ref(),
+                "known failure ci test error",
+                12,
+            )?;
+            emit_memory_search("known CI failures", &memories, *json)?;
+        }
+        CiCommand::FixHistory {
+            query,
+            workspace,
+            json,
+        } => {
+            let query = query
+                .clone()
+                .unwrap_or_else(|| "previous fix ci failure".to_string());
+            let memories = ci_memory_search(engine, workspace.as_ref(), &query, 12)?;
+            emit_memory_search("CI fix history", &memories, *json)?;
+        }
+        CiCommand::Health { workspace, json } => {
+            let memories =
+                ci_memory_search(engine, workspace.as_ref(), "ci failure test error", 64)?;
+            let report = json!({
+                "known_failures": memories.len(),
+                "health": if memories.len() > 8 { "watch" } else { "ok" },
+                "next_command": "memory ci explain-failure",
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "CI memory health: {}",
+                    report["health"].as_str().unwrap_or("ok")
+                );
+                println!("known failure memories: {}", memories.len());
+                println!("next: memory ci explain-failure");
+            }
+        }
+        CiCommand::Export { output, workspace } => {
+            let memories =
+                ci_memory_search(engine, workspace.as_ref(), "ci failure test error", 128)?;
+            let markdown = render_ci_markdown(&memories, false);
+            fs::write(output, markdown)?;
+            println!("exported CI report to {}", output.display());
+        }
+        CiCommand::Report { output, workspace } => {
+            let memories =
+                ci_memory_search(engine, workspace.as_ref(), "ci failure test error", 32)?;
+            let markdown = render_ci_markdown(&memories, false);
+            if let Some(output) = output {
+                fs::write(output, markdown)?;
+                println!("wrote CI report to {}", output.display());
+            } else {
+                println!("{markdown}");
+            }
+        }
+        CiCommand::PrComment { output, workspace } => {
+            let memories =
+                ci_memory_search(engine, workspace.as_ref(), "ci failure test error", 12)?;
+            let markdown = render_ci_markdown(&memories, true);
+            if let Some(output) = output {
+                fs::write(output, markdown)?;
+                println!("wrote CI PR comment to {}", output.display());
+            } else {
+                println!("{markdown}");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn render_ci_markdown(memories: &[memory_core::RetrievedMemory], pr_comment: bool) -> String {
+    let mut markdown = if pr_comment {
+        String::from("## memory.cpp CI notes\n\n")
+    } else {
+        String::from("# CI memory report\n\n")
+    };
+    if memories.is_empty() {
+        markdown.push_str("No CI failure memory has been recorded yet.\n\n");
+        markdown.push_str("Try: `memory ci ingest ./ci.log`\n");
+        return markdown;
+    }
+    markdown.push_str("Known failures and previous fixes:\n\n");
+    for item in memories {
+        markdown.push_str(&format!("- {}\n", item.memory.summary));
+    }
+    markdown.push_str("\nSuggested next step: `memory ci explain-failure`\n");
+    markdown
+}
+
+fn ci_memory_search(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<memory_core::RetrievedMemory>> {
+    let scope = required_workspace(engine, workspace)?;
+    Ok(engine.search(
+        RecallQuery::new(query)
+            .workspace(scope)
+            .kind(MemoryKind::Bug)
+            .limit(limit)
+            .include_content(true),
+    )?)
+}
+
+fn emit_memory_search(
+    title: &str,
+    memories: &[memory_core::RetrievedMemory],
+    json_output: bool,
+) -> Result<()> {
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(memories)?);
+    } else if memories.is_empty() {
+        println!("no {title} found");
+    } else {
+        println!("{title}:");
+        for item in memories {
+            println!("  - {}", item.memory.summary);
+        }
+    }
+    Ok(())
+}
+
+fn parse_ci_failures(raw: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        if trimmed.len() > 8
+            && ["failed", "failure", "error:", "panic", "assertion", "flaky"]
+                .iter()
+                .any(|needle| lower.contains(needle))
+        {
+            out.push(trimmed.chars().take(280).collect());
+        }
+        if out.len() >= 32 {
+            break;
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn welcome_command(engine: &MemoryEngine) -> Result<()> {
+    println!("Welcome to memory.cpp");
+    println!("Your repo can remember what happened, why it changed, and what to do next.");
+    println!();
+    println!("Nothing scary happened: this command only explains the tool.");
+    println!(
+        "Data stays local by default at {}",
+        engine.store_path().display()
+    );
+    println!();
+    println!("Try these next:");
+    println!("1. memory setup --developer");
+    println!("2. memory dev morning");
+    println!("3. memory show-map");
+    Ok(())
+}
+
+fn setup_command(engine: &MemoryEngine, args: &ManualSetupCli) -> Result<()> {
+    if args.reset {
+        println!("setup reset requested");
+        println!("Run `memory privacy purge --yes` to delete local memory data.");
+        return Ok(());
+    }
+
+    let profile = if args.minimal {
+        "minimal"
+    } else if args.ai_coding {
+        "ai-coding"
+    } else if args.private {
+        "private"
+    } else if args.offline {
+        "offline"
+    } else {
+        "developer"
+    };
+    let workspace = args
+        .workspace
+        .clone()
+        .or_else(|| {
+            env::current_dir().ok().and_then(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+            })
+        })
+        .unwrap_or_else(|| "default".to_string());
+
+    if args.interactive && !args.yes {
+        println!("Interactive setup");
+        println!("Suggested workspace: {workspace}");
+        if !ask_yes_no("Create or activate this workspace?", true)? {
+            println!("No changes made.");
+            return Ok(());
+        }
+    }
+
+    engine.create_workspace(&workspace, "developer workspace", "project", true)?;
+    set_default_workspace(engine.store_path(), &workspace)?;
+
+    let base_dir = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"));
+    fs::create_dir_all(base_dir)?;
+    fs::create_dir_all(base_dir.join("runtime"))?;
+    fs::create_dir_all(base_dir.join("audit"))?;
+    fs::create_dir_all(base_dir.join("terminal"))?;
+
+    let cwd = env::current_dir()?;
+    let ignore_path = cwd.join(".memoryignore");
+    if !ignore_path.exists() && !args.minimal {
+        fs::write(&ignore_path, DEFAULT_MEMORYIGNORE)?;
+    } else if ignore_path.exists() && args.interactive && !args.yes {
+        println!(".memoryignore already exists; keeping it unchanged");
+    }
+
+    let config_file = config_path(engine.store_path());
+    let config_exists = config_file.exists();
+    let mut config = load_app_config(engine.store_path())?;
+    config.default_workspace = Some(workspace.clone());
+    config.profile = Some(profile.to_string());
+    config.mcp.read_only = true;
+    config.mcp.redact_sensitive = true;
+    if args.offline || args.private {
+        config.embedding.provider = Some("hash".to_string());
+    }
+    let save_config = !config_exists
+        || args.yes
+        || (args.interactive && ask_yes_no("Update existing memory config?", true)?);
+    if save_config {
+        save_app_config(engine.store_path(), &config)?;
+    }
+
+    let detections = setup_detections(&cwd);
+    let report = json!({
+        "profile": profile,
+        "workspace": workspace,
+        "database": engine.store_path(),
+        "config": config_file,
+        "config_updated": save_config,
+        "memoryignore": ignore_path,
+        "detections": detections,
+        "next_commands": [
+            "memory dev morning",
+            "memory dev context --for codex",
+            "memory show-map"
+        ],
+    });
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("Welcome to memory.cpp");
+        println!("Profile: {profile}");
+        println!(
+            "Workspace: {}",
+            report["workspace"].as_str().unwrap_or("default")
+        );
+        println!("Database: {}", engine.store_path().display());
+        println!("Saved locally. Not uploaded anywhere.");
+        if !save_config {
+            println!("Existing config kept unchanged. Re-run with --yes to update it.");
+        }
+        if !args.minimal {
+            println!(
+                "Safety: .memoryignore is ready at {}",
+                ignore_path.display()
+            );
+        }
+        println!("Detected:");
+        for (key, value) in detections.as_object().into_iter().flatten() {
+            println!("  - {key}: {}", value.as_str().unwrap_or("unknown"));
+        }
+        println!("Recommended setup:");
+        println!("  - terminal memory: opt-in with memory terminal enable");
+        println!("  - git watch: try memory git watch --once --dry-run");
+        println!("  - AI context: try memory dev context --for codex");
+        println!("Next three commands:");
+        println!("1. memory dev morning");
+        println!("2. memory dev context --for codex");
+        println!("3. memory show-map");
+        println!("Delete/reset later: memory privacy purge --yes");
+    }
+    Ok(())
+}
+
+fn setup_detections(root: &Path) -> Value {
+    let package_manager = if root.join("Cargo.toml").exists() {
+        "cargo"
+    } else if root.join("pnpm-lock.yaml").exists() {
+        "pnpm"
+    } else if root.join("package-lock.json").exists() {
+        "npm"
+    } else {
+        "unknown"
+    };
+    let language = if root.join("Cargo.toml").exists() {
+        "rust"
+    } else if root.join("package.json").exists() {
+        "javascript"
+    } else if root.join("pyproject.toml").exists() {
+        "python"
+    } else if root.join("go.mod").exists() {
+        "go"
+    } else {
+        "unknown"
+    };
+    let test_command = infer_test_command(root).unwrap_or_else(|| "unknown".to_string());
+    let build_command = infer_build_command(root).unwrap_or_else(|| "unknown".to_string());
+    json!({
+        "git_repo": if git_repo_root(root).is_some() { "yes" } else { "no" },
+        "cursor": if root.join(".cursor").exists() { "yes" } else { "no" },
+        "vscode": if root.join(".vscode").exists() { "yes" } else { "no" },
+        "claude": if root.join(".claude").exists() { "yes" } else { "no" },
+        "ollama": if check_ollama("http://localhost:11434").unwrap_or(false) { "yes" } else { "no" },
+        "package_manager": package_manager,
+        "language": language,
+        "test_command": test_command,
+        "build_command": build_command,
+        "readme": if root.join("README.md").exists() { "yes" } else { "no" },
+        "memoryignore": if root.join(".memoryignore").exists() { "yes" } else { "no" },
+        "memory_dir": if root.join(".memory.cpp").exists() { "yes" } else { "no" },
+        "ci": if root.join(".github").join("workflows").exists() { "yes" } else { "no" },
+        "docs": if root.join("docs").exists() { "yes" } else { "no" },
+    })
+}
+
+fn infer_test_command(root: &Path) -> Option<String> {
+    if root.join("Cargo.toml").exists() {
+        Some("cargo test".to_string())
+    } else if root.join("package.json").exists() {
+        Some("npm test".to_string())
+    } else if root.join("pyproject.toml").exists() {
+        Some("pytest".to_string())
+    } else if root.join("go.mod").exists() {
+        Some("go test ./...".to_string())
+    } else {
+        None
+    }
+}
+
+fn infer_build_command(root: &Path) -> Option<String> {
+    if root.join("Cargo.toml").exists() {
+        Some("cargo build".to_string())
+    } else if root.join("package.json").exists() {
+        Some("npm run build".to_string())
+    } else if root.join("go.mod").exists() {
+        Some("go build ./...".to_string())
+    } else {
+        None
+    }
+}
+
+fn ask_yes_no(prompt: &str, default_yes: bool) -> Result<bool> {
+    print!("{} [{}] ", prompt, if default_yes { "Y/n" } else { "y/N" });
+    io::stdout().flush()?;
+    let mut line = String::new();
+    io::stdin().read_line(&mut line)?;
+    let trimmed = line.trim().to_ascii_lowercase();
+    if trimmed.is_empty() {
+        return Ok(default_yes);
+    }
+    Ok(matches!(trimmed.as_str(), "y" | "yes"))
+}
+
+fn tutorial_command(engine: &MemoryEngine, command: &Option<TutorialCommand>) -> Result<()> {
+    match command {
+        Some(TutorialCommand::Start { workspace, json }) => {
+            let cards = json!([
+                { "step": 1, "title": "Find the memory", "command": "memory search SQLite --profile decision" },
+                { "step": 2, "title": "Approve a candidate", "command": "memory inbox explain <id>" },
+                { "step": 3, "title": "Generate your first map", "command": "memory show-map" },
+                { "step": 4, "title": "Create an AI context pack", "command": "memory dev context --for codex" },
+                { "step": 5, "title": "Recover a forgotten command", "command": "memory terminal search \"test\"" },
+                { "step": 6, "title": "Fix a fake CI failure", "command": "memory ci explain-failure" }
+            ]);
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&cards)?);
+            } else {
+                println!("memory.cpp tutorial");
+                println!("Workspace: {}", workspace.as_deref().unwrap_or("current"));
+                for card in cards.as_array().cloned().unwrap_or_default() {
+                    println!(
+                        "{}. {} -> {}",
+                        card["step"].as_u64().unwrap_or(0),
+                        card["title"].as_str().unwrap_or("step"),
+                        card["command"].as_str().unwrap_or("memory help-me")
+                    );
+                }
+                println!("Completion badge: local memory scout");
+            }
+        }
+        None => {
+            let _ = engine;
+            println!("Start the tutorial with `memory tutorial start`.");
+        }
+    }
+    Ok(())
+}
+
+fn what_command(engine: &MemoryEngine) -> Result<()> {
+    println!(
+        "memory.cpp helps your repo remember what happened, why it changed, and what to do next."
+    );
+    println!("- watches useful repo activity when you ask it to");
+    println!("- remembers decisions, errors, commands, and context");
+    println!("- asks before saving uncertain or important candidates");
+    println!("- helps you resume work later with dev morning/resume");
+    println!("- generates project maps and AI context packs");
+    println!(
+        "- stores local project memory in {}",
+        engine.store_path().display()
+    );
+    println!("Nothing is uploaded by default.");
+    println!("Next: memory setup --developer");
+    Ok(())
+}
+
+fn where_command(engine: &MemoryEngine) -> Result<()> {
+    let db = engine.store_path();
+    let base = db.parent().unwrap_or_else(|| Path::new(".memory.cpp"));
+    println!("memory.cpp local paths");
+    println!("database: {}", db.display());
+    println!("config: {}", config_path(db).display());
+    println!("runtime: {}", base.join("runtime").display());
+    println!("audit: {}", base.join("audit").display());
+    println!("logs: {}", base.join("runtime").display());
+    println!("terminal: {}", base.join("terminal").display());
+    println!("maps: {}", base.join("demo").display());
+    println!(
+        ".memoryignore: {}",
+        env::current_dir()?.join(".memoryignore").display()
+    );
+    println!("delete everything: memory privacy purge --yes");
+    Ok(())
+}
+
+fn day_recap_command(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    days_ago: i64,
+    verbose: bool,
+    json_output: bool,
+) -> Result<()> {
+    let scope = workspace
+        .cloned()
+        .or(current_workspace_name(engine)?)
+        .or_else(|| {
+            load_app_config(engine.store_path())
+                .ok()
+                .and_then(|config| config.default_workspace)
+        });
+    let start = Utc::now() - ChronoDuration::days(days_ago + 1);
+    let end = Utc::now() - ChronoDuration::days(days_ago);
+    let mut events = engine.timeline(scope.as_deref(), None, 80)?;
+    events.retain(|event| event.created_at >= start && event.created_at <= end);
+    let event_count = events.len();
+    let cwd = env::current_dir()?;
+    let repo = git_repo_root(&cwd);
+    let branch = repo
+        .as_ref()
+        .and_then(|root| git_stdout(root, &["branch", "--show-current"]).ok())
+        .unwrap_or_else(|| "not a git repo".to_string());
+    let dirty = repo
+        .as_ref()
+        .map(|root| repo_status_report(root)["dirty_count"].clone())
+        .unwrap_or_else(|| json!(0));
+    let recent_commands = read_terminal_entries(engine, 5).unwrap_or_default();
+    let pending = engine
+        .inbox(scope.as_deref(), Some("pending"))
+        .unwrap_or_default()
+        .len();
+    let base = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"));
+    let latest_map = newest_file(&[base.join("demo"), base.to_path_buf()], "html");
+    let report = json!({
+        "workspace": scope,
+        "branch": branch,
+        "uncommitted_changes": dirty,
+        "events": events,
+        "recent_commands": recent_commands,
+        "pending_candidates": pending,
+        "latest_map": latest_map,
+        "next_command": "memory dev next",
+    });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+    println!(
+        "{} recap",
+        if days_ago == 0 { "today" } else { "yesterday" }
+    );
+    println!(
+        "workspace: {}",
+        report["workspace"].as_str().unwrap_or("default")
+    );
+    println!("branch: {}", report["branch"].as_str().unwrap_or("unknown"));
+    println!("uncommitted changes: {}", report["uncommitted_changes"]);
+    println!("pending candidates: {pending}");
+    if event_count == 0 {
+        println!("No local memory events found. Nothing scary happened.");
+        println!("Try: memory dev morning");
+    } else {
+        println!("recent memory events:");
+        for event in engine
+            .timeline(scope.as_deref(), None, 80)?
+            .into_iter()
+            .take(if verbose { 12 } else { 5 })
+        {
+            println!("- {} ({})", event.body, event.event_type);
+        }
+    }
+    if verbose && !recent_commands.is_empty() {
+        println!("recent terminal commands:");
+        for entry in recent_commands {
+            println!("- [{}] {}", entry.exit_code, entry.command);
+        }
+    }
+    println!(
+        "last map: {}",
+        report["latest_map"].as_str().unwrap_or("not generated yet")
+    );
+    println!("next: memory dev next");
+    Ok(())
+}
+
+fn open_command(args: &ManualOpenCli) -> Result<()> {
+    let target = args
+        .print_target
+        .as_deref()
+        .or(args.target.as_deref())
+        .unwrap_or("dashboard");
+    let value = open_target_value(target, args.host.as_str(), args.port)?;
+    if args.print_target.is_some() {
+        println!("{value}");
+        return Ok(());
+    }
+    if open_with_os(&value).is_ok() {
+        println!("opened {target}: {value}");
+    } else {
+        println!("{target}: {value}");
+        println!("Could not open automatically in this environment.");
+    }
+    if target == "dashboard" {
+        println!("If it is not running yet: memory start");
+    }
+    Ok(())
+}
+
+fn open_target_value(target: &str, host: &str, port: u16) -> Result<String> {
+    let cwd = env::current_dir()?;
+    let value = match target {
+        "dashboard" => format!("http://{host}:{port}/"),
+        "map" => newest_file(
+            &[
+                cwd.join(".memory.cpp").join("demo"),
+                cwd.join(".memory.cpp"),
+            ],
+            "html",
+        )
+        .unwrap_or_else(|| {
+            cwd.join(".memory.cpp/demo/evolution.html")
+                .display()
+                .to_string()
+        }),
+        "docs" => cwd.join("docs/quickstart.md").display().to_string(),
+        "privacy" => cwd.join("docs/privacy.md").display().to_string(),
+        "folder" => cwd.join(".memory.cpp").display().to_string(),
+        "website" => cwd.join("website/index.html").display().to_string(),
+        other => other.to_string(),
+    };
+    Ok(value)
+}
+
+fn open_with_os(target: &str) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        ProcessCommand::new("cmd")
+            .args(["/C", "start", "", target])
+            .spawn()
+            .map(|_| ())
+            .context("failed to open target")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        ProcessCommand::new("open")
+            .arg(target)
+            .spawn()
+            .map(|_| ())
+            .context("failed to open target")
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        ProcessCommand::new("xdg-open")
+            .arg(target)
+            .spawn()
+            .map(|_| ())
+            .context("failed to open target")
+    }
+}
+
+fn clean_command(engine: &MemoryEngine) -> Result<()> {
+    let base = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"));
+    let runtime = base.join("runtime");
+    let mut removed = 0usize;
+    if runtime.exists() {
+        for file in runtime_state_files(&runtime).unwrap_or_default() {
+            if fs::remove_file(file).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    println!("Cleaned {removed} safe runtime state file(s).");
+    println!("Durable memories were not touched.");
+    Ok(())
+}
+
+fn help_me_command(engine: &MemoryEngine) -> Result<()> {
+    println!("Here is the shortest path:");
+    println!("1. memory what");
+    println!("2. memory where");
+    println!("3. memory dev morning");
+    println!("4. memory doctor");
+    println!("Store: {}", engine.store_path().display());
+    Ok(())
+}
+
+fn explain_this_command(command: &str) -> Result<()> {
+    let command = command.trim();
+    if command.is_empty() {
+        println!("Tell me a command, for example: memory explain-this \"memory dev morning\"");
+        return Ok(());
+    }
+    let explanation = if command.contains("dev morning") {
+        "Shows what changed recently, what broke, open TODOs, and the next command."
+    } else if command.contains("dev context") {
+        "Builds a clean repo context block for an AI assistant."
+    } else if command.contains("map") {
+        "Builds a local project map from memories, citations, and optional Git signals."
+    } else if command.contains("doctor") {
+        "Checks local setup, safety defaults, ports, and integration config."
+    } else if command.contains("privacy") {
+        "Shows or deletes local memory data."
+    } else {
+        "This looks like a memory.cpp command. Run it with --help or try memory help-me."
+    };
+    println!("{command}");
+    println!("{explanation}");
+    Ok(())
+}
+
+fn show_map_command(engine: &MemoryEngine, workspace: Option<&String>, save: &Path) -> Result<()> {
+    map_command(
+        engine,
+        Some(&env::current_dir()?),
+        None,
+        workspace,
+        CliMapType::Evolution,
+        CliMapOutput::Html,
+        None,
+        None,
+        true,
+        false,
+        None,
+        None,
+        None,
+        Some(save),
+    )?;
+    println!("saved locally: {}", save.display());
+    println!("not uploaded anywhere");
+    Ok(())
+}
+
+fn privacy_command(engine: &MemoryEngine, command: &Option<PrivacyCommand>) -> Result<()> {
+    match command {
+        Some(PrivacyCommand::Status { json }) => {
+            let base = engine
+                .store_path()
+                .parent()
+                .unwrap_or_else(|| Path::new(".memory.cpp"));
+            let report = json!({
+                "database": engine.store_path(),
+                "config": config_path(engine.store_path()),
+                "local_first": true,
+                "mcp_read_only_default": load_app_config(engine.store_path()).unwrap_or_default().mcp.read_only,
+                "redaction_default": load_app_config(engine.store_path()).unwrap_or_default().mcp.redact_sensitive,
+                "cloud_used": false,
+                "memoryignore": env::current_dir()?.join(".memoryignore"),
+                "audit": base.join("audit"),
+                "terminal": base.join("terminal"),
+                "terminal_paused": terminal_paused(engine).unwrap_or(false),
+                "git_watch_state": base.join("git-watch").join("state.json"),
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("privacy status");
+                println!("local-only database: {}", engine.store_path().display());
+                println!("MCP read-only by default: yes");
+                println!("redaction default: yes");
+                println!("cloud upload: no");
+                println!(
+                    "terminal memory paused: {}",
+                    report["terminal_paused"].as_bool().unwrap_or(false)
+                );
+                println!(
+                    ".memoryignore: {}",
+                    report["memoryignore"].as_str().unwrap_or("")
+                );
+                println!("delete everything: memory privacy purge --yes");
+            }
+        }
+        Some(PrivacyCommand::Explain) | None => {
+            println!("memory.cpp stores data locally by default.");
+            println!("It does not upload your repo.");
+            println!("Terminal memory is opt-in.");
+            println!("MCP is read-only unless you pass --allow-writes.");
+            println!("Use .memoryignore to keep files out of imports and watch flows.");
+        }
+        Some(PrivacyCommand::Purge { yes }) | Some(PrivacyCommand::Reset { yes }) => {
+            if !yes {
+                println!("Refusing to purge without --yes.");
+                println!("Run: memory privacy purge --yes");
+                return Ok(());
+            }
+            let base = engine
+                .store_path()
+                .parent()
+                .unwrap_or_else(|| Path::new(".memory.cpp"))
+                .to_path_buf();
+            println!("Purging local memory files under {}", base.display());
+            println!("If Windows keeps the open database locked, close running memory processes and remove the folder manually.");
+            if base.exists() {
+                match fs::remove_dir_all(&base) {
+                    Ok(()) => println!("purged {}", base.display()),
+                    Err(err) => println!("could not remove {}: {err}", base.display()),
+                }
+            }
+        }
+        Some(PrivacyCommand::Export { output }) => {
+            export_command(engine, None, &ExportFormat::Jsonl, output)?;
+            println!("exported local memories to {}", output.display());
+        }
+        Some(PrivacyCommand::Receipts { json }) => {
+            let base = engine
+                .store_path()
+                .parent()
+                .unwrap_or_else(|| Path::new(".memory.cpp"));
+            let receipts = json!({
+                "mcp_audit_log": base.join("audit").join("mcp-access.jsonl"),
+                "terminal_log": base.join("terminal").join("commands.jsonl"),
+                "candidate_review": "memory inbox list",
+                "local_only": true,
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&receipts)?);
+            } else {
+                println!("privacy receipts");
+                println!(
+                    "MCP audit log: {}",
+                    base.join("audit").join("mcp-access.jsonl").display()
+                );
+                println!(
+                    "terminal log: {}",
+                    base.join("terminal").join("commands.jsonl").display()
+                );
+                println!("candidate review: memory inbox list");
+                println!("cloud upload: no");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn explain_or_topic_command(engine: &MemoryEngine, args: &ManualExplainCli) -> Result<()> {
+    let topic = args.query.join(" ").trim().to_ascii_lowercase();
+    if let Some(explanation) = beginner_explanation(&topic) {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&explanation)?);
+        } else {
+            println!("{}", explanation["title"].as_str().unwrap_or("memory.cpp"));
+            println!(
+                "what it means: {}",
+                explanation["meaning"].as_str().unwrap_or("")
+            );
+            println!("why useful: {}", explanation["why"].as_str().unwrap_or(""));
+            println!(
+                "local by default: {}",
+                explanation["local"].as_str().unwrap_or("yes")
+            );
+            println!(
+                "try: {}",
+                explanation["command"].as_str().unwrap_or("memory what")
+            );
+        }
+        return Ok(());
+    }
+    if !topic.is_empty() && args.workspace.is_none() && !args.last && args.query.len() <= 3 {
+        let suggestions = suggest_explain_topics(&topic);
+        if args.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "topic": topic,
+                    "known": false,
+                    "suggestions": suggestions,
+                    "examples": ["memory explain memory", "memory explain candidate", "memory explain dev context"]
+                }))?
+            );
+        } else {
+            println!("I do not have a beginner card for '{topic}' yet.");
+            if !suggestions.is_empty() {
+                println!("nearby topics: {}", suggestions.join(", "));
+            }
+            println!("examples: memory explain memory | memory explain candidate | memory explain dev context");
+        }
+        return Ok(());
+    }
+    explain_command(
+        engine,
+        &args.query,
+        args.workspace.as_ref(),
+        args.limit,
+        args.last,
+        args.json,
+    )
+}
+
+fn beginner_explanation(topic: &str) -> Option<Value> {
+    let normalized = topic.trim().replace('-', " ");
+    let (title, meaning, why, command) = match normalized.as_str() {
+        "" | "memory" | "memory.cpp" => (
+            "memory.cpp",
+            "A local repo memory tool that stores useful decisions, fixes, commands, and context.",
+            "It helps you resume work and gives AI assistants better project context.",
+            "memory what",
+        ),
+        "workspace" => (
+            "workspace",
+            "A named scope for memories, usually one repo or project.",
+            "It keeps project memory separate from other projects.",
+            "memory workspace current",
+        ),
+        "candidate" | "inbox candidate" => (
+            "candidate",
+            "A suggested memory waiting for review.",
+            "It lets memory.cpp be helpful without silently storing uncertain facts.",
+            "memory inbox stats",
+        ),
+        "inbox" => (
+            "inbox",
+            "The review queue for candidate memories.",
+            "You approve useful memories and reject noisy or sensitive ones.",
+            "memory show-inbox",
+        ),
+        "provenance" => (
+            "provenance",
+            "The source trail for a memory: file, commit, command, chat, or importer.",
+            "It makes memory explainable instead of magical.",
+            "memory explain why SQLite --workspace demo",
+        ),
+        "map" | "memory map" => (
+            "map",
+            "A visual project story built from memories, citations, and optional Git signals.",
+            "It shows what changed, why it changed, and what depends on it.",
+            "memory show-map",
+        ),
+        "context" | "context pack" => (
+            "context pack",
+            "A short briefing generated for Cursor, Codex, Claude, or another assistant.",
+            "It gives AI tools repo facts without pasting the whole project.",
+            "memory dev context --for codex",
+        ),
+        "git watch" => (
+            "git watch",
+            "A local observer for branch and commit changes.",
+            "It turns meaningful Git activity into candidate memories.",
+            "memory git watch --once --dry-run",
+        ),
+        "terminal memory" | "terminal" => (
+            "terminal memory",
+            "Opt-in command history for this repo.",
+            "It remembers how you ran tests, builds, servers, and fixes.",
+            "memory terminal enable",
+        ),
+        "doctor" => (
+            "doctor",
+            "A setup checker for database, workspace, privacy, Git, maps, and integrations.",
+            "It gives exact fix commands instead of vague errors.",
+            "memory doctor",
+        ),
+        "privacy" => (
+            "privacy",
+            "The local-first safety surface: paths, redaction, purge, and MCP write policy.",
+            "It shows what is stored and how to delete it.",
+            "memory privacy status",
+        ),
+        "mcp" => (
+            "MCP",
+            "A protocol that lets coding assistants call memory tools.",
+            "memory.cpp defaults MCP to read-only and redacted.",
+            "memory attach cursor",
+        ),
+        "proxy" => (
+            "proxy",
+            "A local OpenAI-compatible proxy that can inject memory context.",
+            "It lets local model workflows benefit from project memory.",
+            "memory proxy --learn --approval-required",
+        ),
+        "embeddings" | "embedding" | "semantic search" => (
+            "embeddings",
+            "Small numeric vectors used for semantic recall.",
+            "They help find related memories even when wording differs.",
+            "memory embeddings status",
+        ),
+        "dev morning" => (
+            "dev morning",
+            "A daily recap command for where you left off and what to do next.",
+            "It is the everyday habit command.",
+            "memory dev morning",
+        ),
+        "dev resume" => (
+            "dev resume",
+            "A command that reconstructs interrupted work from memory, Git, TODOs, and commands.",
+            "It helps after context switches and weekends.",
+            "memory dev resume",
+        ),
+        "dev context" => (
+            "dev context",
+            "A repo briefing for AI coding tools.",
+            "It makes assistants more accurate without cloud sync.",
+            "memory dev context --for cursor",
+        ),
+        "ci" => (
+            "CI memory",
+            "Lightweight memory for imported CI failures and previous fixes.",
+            "It helps you remember how a build failed before.",
+            "memory ci ingest ./ci.log",
+        ),
+        "redaction" => (
+            "redaction",
+            "Replacing detected secrets with safe placeholders before recall or preview.",
+            "It reduces the chance of exposing tokens or private keys.",
+            "memory redact test .env",
+        ),
+        ".memoryignore" | "memoryignore" => (
+            ".memoryignore",
+            "A local ignore file for memory import and watch flows.",
+            "It keeps secrets and noisy folders out of memory.",
+            "memory ignore init",
+        ),
+        _ => return None,
+    };
+    Some(json!({
+        "title": title,
+        "meaning": meaning,
+        "why": why,
+        "local": "yes",
+        "command": command,
+    }))
+}
+
+fn suggest_explain_topics(topic: &str) -> Vec<&'static str> {
+    let topics = [
+        "memory",
+        "workspace",
+        "candidate",
+        "inbox",
+        "provenance",
+        "map",
+        "context",
+        "git watch",
+        "terminal memory",
+        "doctor",
+        "privacy",
+        "mcp",
+        "proxy",
+        "embeddings",
+        "dev morning",
+        "dev resume",
+        "dev context",
+        "ci",
+        "redaction",
+        ".memoryignore",
+    ];
+    topics
+        .into_iter()
+        .filter(|candidate| {
+            candidate.contains(topic)
+                || topic.contains(*candidate)
+                || candidate
+                    .split_whitespace()
+                    .any(|part| topic.contains(part))
+        })
+        .take(5)
+        .collect()
+}
+
+fn examples_command(area: Option<&str>, json_output: bool) -> Result<()> {
+    let area = area.unwrap_or("all").to_ascii_lowercase();
+    let workflows = example_workflows();
+    let selected = workflows
+        .iter()
+        .filter(|workflow| area == "all" || workflow["area"].as_str() == Some(area.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&selected)?);
+    } else {
+        let selected = if selected.is_empty() {
+            workflows
+                .iter()
+                .filter(|workflow| workflow["area"].as_str() == Some("dev"))
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            selected
+        };
+        for workflow in selected {
+            println!("{}", workflow["title"].as_str().unwrap_or("workflow"));
+            for command in workflow["commands"].as_array().into_iter().flatten() {
+                println!("  {}", command.as_str().unwrap_or(""));
+            }
+            println!();
+        }
+    }
+    Ok(())
+}
+
+fn example_workflows() -> Vec<Value> {
+    vec![
+        json!({"area": "dev", "title": "Daily developer loop", "commands": ["memory setup --developer", "memory dev morning", "memory dev next", "memory show-map"]}),
+        json!({"area": "ai", "title": "Give an assistant repo context", "commands": ["memory dev explain-repo", "memory dev context --for cursor", "memory dev context --for codex"]}),
+        json!({"area": "privacy", "title": "Check and reset local data", "commands": ["memory privacy status", "memory where", "memory redact test .env", "memory privacy purge --yes"]}),
+        json!({"area": "map", "title": "Generate a project map", "commands": ["memory demo seed", "memory map --type evolution --output html --save .memory.cpp/demo/evolution.html", "memory map latest"]}),
+        json!({"area": "terminal", "title": "Remember useful commands", "commands": ["memory terminal enable", "memory terminal record --command \"cargo test\" --exit-code 0", "memory terminal search test"]}),
+        json!({"area": "git", "title": "Turn Git activity into memory candidates", "commands": ["memory git summary --since 7d", "memory git watch --once --dry-run", "memory git ingest --dry-run"]}),
+        json!({"area": "ci", "title": "Recall a CI failure", "commands": ["memory ci ingest ./ci.log", "memory ci explain-failure", "memory ci health"]}),
+    ]
+}
+
+fn product_status_command(
+    engine: &MemoryEngine,
+    options: &EngineOptions,
+    json_output: bool,
+    verbose: bool,
+) -> Result<()> {
+    let stats = engine.stats()?;
+    let workspace = current_workspace_name(engine)?.unwrap_or_else(|| "default".to_string());
+    let pending = engine
+        .inbox(Some(&workspace), Some("pending"))
+        .unwrap_or_default()
+        .len();
+    let base = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"));
+    let runtime_files = runtime_state_files(&runtime_dir(options)?).unwrap_or_default();
+    let latest_map = newest_file(&[base.join("demo"), base.to_path_buf()], "html");
+    let report = json!({
+        "workspace": workspace,
+        "database": engine.store_path(),
+        "memory_count": stats.memories,
+        "candidate_count": pending,
+        "git_watch_state": base.join("git-watch").join("state.json").exists(),
+        "terminal_memory": terminal_log_path(engine).map(|path| path.exists()).unwrap_or(false),
+        "terminal_paused": terminal_paused(engine).unwrap_or(false),
+        "privacy_redaction": load_app_config(engine.store_path()).unwrap_or_default().mcp.redact_sensitive,
+        "runtime_state_files": runtime_files.len(),
+        "ai_context_ready": stats.memories > 0,
+        "last_map": latest_map,
+        "next_command": if pending > 0 { "memory show-inbox" } else { "memory dev morning" },
+    });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("memory.cpp status");
+        println!(
+            "workspace: {}",
+            report["workspace"].as_str().unwrap_or("default")
+        );
+        println!("database: {}", engine.store_path().display());
+        println!("memories: {}", stats.memories);
+        println!("pending candidates: {pending}");
+        println!(
+            "terminal memory: {}{}",
+            if report["terminal_memory"].as_bool().unwrap_or(false) {
+                "enabled"
+            } else {
+                "not enabled"
+            },
+            if report["terminal_paused"].as_bool().unwrap_or(false) {
+                " (paused)"
+            } else {
+                ""
+            }
+        );
+        println!(
+            "git watch: {}",
+            if report["git_watch_state"].as_bool().unwrap_or(false) {
+                "baseline recorded"
+            } else {
+                "not started"
+            }
+        );
+        println!("privacy/redaction: on");
+        println!(
+            "AI context: {}",
+            if report["ai_context_ready"].as_bool().unwrap_or(false) {
+                "ready"
+            } else {
+                "needs memories"
+            }
+        );
+        println!(
+            "last map: {}",
+            report["last_map"].as_str().unwrap_or("not generated yet")
+        );
+        if verbose {
+            println!("runtime files: {}", runtime_files.len());
+            println!("embedding provider: {}", stats.embedding_model);
+            println!("stale memories: {}", stats.stale_memories);
+        }
+        println!(
+            "next: {}",
+            report["next_command"]
+                .as_str()
+                .unwrap_or("memory dev morning")
+        );
+    }
+    Ok(())
+}
+
+fn fix_command(
+    engine: &MemoryEngine,
+    options: &EngineOptions,
+    apply: bool,
+    json_output: bool,
+) -> Result<()> {
+    let cwd = env::current_dir()?;
+    let base = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"));
+    let mut issues = Vec::new();
+    if !base.exists() {
+        issues.push(
+            json!({"issue": "missing .memory.cpp directory", "fix": "memory setup --developer"}),
+        );
+        if apply {
+            fs::create_dir_all(base)?;
+        }
+    }
+    let ignore = cwd.join(".memoryignore");
+    if !ignore.exists() {
+        issues.push(json!({"issue": "missing .memoryignore", "fix": "memory ignore init"}));
+        if apply {
+            fs::write(&ignore, DEFAULT_MEMORYIGNORE)?;
+        }
+    }
+    let config = config_path(engine.store_path());
+    if !config.exists() {
+        issues.push(json!({"issue": "missing starter config", "fix": "memory setup --developer"}));
+        if apply {
+            save_app_config(engine.store_path(), &AppConfig::default())?;
+        }
+    }
+    let mut stale_pid_files = 0usize;
+    for state_file in runtime_state_files(&runtime_dir(options)?).unwrap_or_default() {
+        if let Ok(raw) = fs::read_to_string(&state_file) {
+            if let Ok(state) = serde_json::from_str::<RuntimeState>(&raw) {
+                if !pid_is_alive(state.pid).unwrap_or(false) {
+                    stale_pid_files += 1;
+                    issues.push(json!({"issue": format!("stale runtime state: {}", state_file.display()), "fix": "memory clean"}));
+                    if apply {
+                        let _ = fs::remove_file(state_file);
+                    }
+                }
+            }
+        }
+    }
+    let report = json!({
+        "applied": apply,
+        "issues": issues,
+        "stale_pid_files": stale_pid_files,
+        "safe_fixes_only": true,
+    });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else if issues.is_empty() {
+        println!("No obvious setup issues found.");
+        println!("next: memory doctor");
+    } else {
+        println!("memory fix found {} issue(s)", issues.len());
+        for issue in issues {
+            println!("- {}", issue["issue"].as_str().unwrap_or("issue"));
+            println!(
+                "  fix: {}",
+                issue["fix"].as_str().unwrap_or("memory doctor")
+            );
+        }
+        if !apply {
+            println!("No files changed. Re-run with --apply for safe fixes.");
+        }
+    }
+    Ok(())
+}
+
+fn redact_command(command: &RedactCommand) -> Result<()> {
+    match command {
+        RedactCommand::Preview { path, json } => {
+            let hits = redact_preview(path)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&hits)?);
+            } else if hits.is_empty() {
+                println!("no obvious secrets detected");
+            } else {
+                println!("redaction preview:");
+                for hit in hits {
+                    println!("- {}: {}", hit.path, hit.reason);
+                    if let Some(preview) = hit.preview {
+                        println!("  {preview}");
+                    }
+                }
+            }
+        }
+        RedactCommand::Test { file, json } => {
+            let raw = fs::read_to_string(file)
+                .with_context(|| format!("failed to read {}", file.display()))?;
+            let mut hits = Vec::new();
+            for (line, text) in raw.lines().enumerate() {
+                if let Some(reason) = detect_sensitive_reason(text) {
+                    hits.push(json!({
+                        "line": line + 1,
+                        "reason": reason,
+                        "redacted": redact_line(text),
+                    }));
+                }
+            }
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&hits)?);
+            } else if hits.is_empty() {
+                println!("no obvious secrets detected in {}", file.display());
+            } else {
+                println!("redaction test for {}", file.display());
+                for hit in hits {
+                    println!(
+                        "- line {} {} -> {}",
+                        hit["line"],
+                        hit["reason"].as_str().unwrap_or("sensitive"),
+                        hit["redacted"].as_str().unwrap_or("[REDACTED]")
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn redact_preview(path: &Path) -> Result<Vec<RedactionPreviewHit>> {
+    let files = if path.is_dir() {
+        collect_importable_files(path, true)?
+    } else {
+        vec![path.to_path_buf()]
+    };
+    let mut hits = Vec::new();
+    for file in files.into_iter().take(200) {
+        let Ok(raw) = fs::read_to_string(&file) else {
+            continue;
+        };
+        for line in raw.lines().take(2000) {
+            if let Some(reason) = detect_sensitive_reason(line) {
+                hits.push(RedactionPreviewHit {
+                    path: file.display().to_string(),
+                    reason: reason.to_string(),
+                    preview: Some(redact_line(line)),
+                });
+                break;
+            }
+        }
+        if hits.len() >= 64 {
+            break;
+        }
+    }
+    Ok(hits)
+}
+
+fn redact_line(line: &str) -> String {
+    if detect_sensitive_reason(line).is_some() {
+        "[REDACTED sensitive value]".to_string()
+    } else {
+        line.to_string()
+    }
+}
+
+fn config_command(engine: &MemoryEngine, command: &Option<ConfigCommand>) -> Result<()> {
+    if command.is_none() {
+        return config_command(engine, &Some(ConfigCommand::Show { json: false }));
+    }
+    match command.as_ref().expect("checked above") {
+        ConfigCommand::Show { json } => {
+            let config = load_app_config(engine.store_path())?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&config)?);
+            } else {
+                println!("config: {}", config_path(engine.store_path()).display());
+                println!(
+                    "workspace: {}",
+                    config.default_workspace.as_deref().unwrap_or("not set")
+                );
+                println!(
+                    "profile: {}",
+                    config.profile.as_deref().unwrap_or("developer")
+                );
+                println!("mcp read-only: {}", config.mcp.read_only);
+                println!(
+                    "embedding provider: {}",
+                    config.embedding.provider.as_deref().unwrap_or("hash")
+                );
+            }
+        }
+        ConfigCommand::Get { key } => {
+            let value = config_get(engine, key)?;
+            println!("{value}");
+        }
+        ConfigCommand::Set { key, value } => {
+            config_set(engine, key, value)?;
+            println!("config set: {key}={value}");
+        }
+        ConfigCommand::Edit => {
+            println!("{}", config_path(engine.store_path()).display());
+            println!("Open this file in your editor, then run: memory config doctor");
+        }
+        ConfigCommand::Doctor { json } => {
+            let config = load_app_config(engine.store_path())?;
+            let checks = json!({
+                "has_workspace": config.default_workspace.is_some(),
+                "mcp_read_only": config.mcp.read_only,
+                "redaction": config.mcp.redact_sensitive,
+                "provider": config.embedding.provider.unwrap_or_else(|| "hash".to_string()),
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&checks)?);
+            } else {
+                println!("config doctor");
+                println!("workspace set: {}", checks["has_workspace"]);
+                println!("MCP read-only: {}", checks["mcp_read_only"]);
+                println!("redaction: {}", checks["redaction"]);
+                println!(
+                    "embedding provider: {}",
+                    checks["provider"].as_str().unwrap_or("hash")
+                );
+            }
+        }
+        ConfigCommand::Reset { yes } => {
+            if !*yes {
+                println!("Run memory config reset --yes to replace local config with defaults.");
+                return Ok(());
+            }
+            save_app_config(engine.store_path(), &AppConfig::default())?;
+            println!("config reset");
+        }
+        ConfigCommand::Export { output } => {
+            fs::copy(config_path(engine.store_path()), output)?;
+            println!("exported config to {}", output.display());
+        }
+        ConfigCommand::Import { input } => {
+            let config: AppConfig = serde_json::from_str(&fs::read_to_string(input)?)?;
+            save_app_config(engine.store_path(), &config)?;
+            println!("imported config from {}", input.display());
+        }
+        ConfigCommand::Path => {
+            println!("{}", config_path(engine.store_path()).display());
+        }
+        ConfigCommand::Profiles => {
+            println!("available profiles:");
+            for profile in [
+                "beginner",
+                "developer",
+                "ai-coding",
+                "private",
+                "offline",
+                "low-ram",
+                "power-user",
+            ] {
+                println!("  - {profile}");
+            }
+            println!("set one with: memory config set profile developer");
+        }
+    }
+    Ok(())
+}
+
+fn config_get(engine: &MemoryEngine, key: &str) -> Result<String> {
+    let config = load_app_config(engine.store_path())?;
+    let value = match key {
+        "workspace" | "default_workspace" => config.default_workspace.unwrap_or_default(),
+        "profile" => config.profile.unwrap_or_else(|| "developer".to_string()),
+        "mcp.read_only" => config.mcp.read_only.to_string(),
+        "mcp.redact_sensitive" => config.mcp.redact_sensitive.to_string(),
+        "embedding.provider" => config
+            .embedding
+            .provider
+            .unwrap_or_else(|| "hash".to_string()),
+        "embedding.model" => config.embedding.model.unwrap_or_default(),
+        "embedding.endpoint" => config.embedding.endpoint.unwrap_or_default(),
+        other => return Err(anyhow!("unknown config key: {other}")),
+    };
+    Ok(value)
+}
+
+fn config_set(engine: &MemoryEngine, key: &str, value: &str) -> Result<()> {
+    let mut config = load_app_config(engine.store_path())?;
+    match key {
+        "workspace" | "default_workspace" => config.default_workspace = Some(value.to_string()),
+        "profile" => config.profile = Some(value.to_string()),
+        "mcp.read_only" => config.mcp.read_only = parse_bool(value)?,
+        "mcp.redact_sensitive" => config.mcp.redact_sensitive = parse_bool(value)?,
+        "embedding.provider" => config.embedding.provider = Some(value.to_string()),
+        "embedding.model" => config.embedding.model = Some(value.to_string()),
+        "embedding.endpoint" => config.embedding.endpoint = Some(value.to_string()),
+        other => return Err(anyhow!("unknown config key: {other}")),
+    }
+    save_app_config(engine.store_path(), &config)
+}
+
+fn parse_bool(value: &str) -> Result<bool> {
+    match value.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "1" | "on" => Ok(true),
+        "false" | "no" | "0" | "off" => Ok(false),
+        other => Err(anyhow!("expected boolean value, got {other}")),
+    }
+}
+
+fn map_latest_command(engine: &MemoryEngine, open: bool) -> Result<()> {
+    let base = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"));
+    let Some(path) = newest_file(&[base.join("demo"), base.to_path_buf()], "html") else {
+        println!("no generated HTML map found yet");
+        println!("try: memory show-map");
+        return Ok(());
+    };
+    println!("{path}");
+    if open {
+        let _ = open_with_os(&path);
+    } else {
+        println!("open it with: memory map open");
+    }
+    Ok(())
+}
+
+fn map_status_command(engine: &MemoryEngine) -> Result<()> {
+    let base = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"));
+    let latest_html = newest_file(
+        &[base.join("demo"), base.join("maps"), base.to_path_buf()],
+        "html",
+    );
+    let latest_md = newest_file(&[base.join("maps"), base.to_path_buf()], "md");
+    println!("map status");
+    println!("latest html: {}", latest_html.as_deref().unwrap_or("none"));
+    println!(
+        "latest markdown: {}",
+        latest_md.as_deref().unwrap_or("none")
+    );
+    println!("refresh: memory map refresh");
+    Ok(())
+}
+
+fn map_refresh_command(engine: &MemoryEngine) -> Result<()> {
+    let save = PathBuf::from(".memory.cpp/maps/evolution.html");
+    map_command(
+        engine,
+        None,
+        None,
+        None,
+        CliMapType::Evolution,
+        CliMapOutput::Html,
+        None,
+        None,
+        true,
+        false,
+        None,
+        None,
+        None,
+        Some(&save),
+    )
+}
+
+fn map_export_markdown_command(engine: &MemoryEngine, title: &str, save: &str) -> Result<()> {
+    let save = PathBuf::from(save);
+    map_command(
+        engine,
+        None,
+        Some(&title.to_string()),
+        None,
+        CliMapType::Evolution,
+        CliMapOutput::Markdown,
+        None,
+        None,
+        true,
+        true,
+        None,
+        None,
+        None,
+        Some(&save),
+    )
+}
+
+fn map_changed_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let since = rest
+        .windows(2)
+        .find(|pair| pair[0] == "--since")
+        .map(|pair| pair[1].as_str())
+        .unwrap_or("7d");
+    println!("map changes since {since}");
+    map_command(
+        engine,
+        None,
+        None,
+        None,
+        CliMapType::Evolution,
+        CliMapOutput::Markdown,
+        None,
+        None,
+        true,
+        true,
+        None,
+        None,
+        None,
+        None,
+    )
+}
+
+fn newest_file(dirs: &[PathBuf], extension: &str) -> Option<String> {
+    let mut newest: Option<(SystemTime, PathBuf)> = None;
+    for dir in dirs {
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case(extension))
+            {
+                let modified = entry
+                    .metadata()
+                    .and_then(|metadata| metadata.modified())
+                    .unwrap_or(SystemTime::UNIX_EPOCH);
+                if newest.as_ref().is_none_or(|(time, _)| modified > *time) {
+                    newest = Some((modified, path));
+                }
+            }
+        }
+    }
+    newest.map(|(_, path)| path.display().to_string())
 }
 
 fn attach_command(
@@ -2870,6 +7355,9 @@ fn attach_command(
     upstream: &str,
     start_proxy: bool,
     workspace: Option<&String>,
+    dry_run: bool,
+    _yes: bool,
+    print_config: bool,
 ) -> Result<()> {
     let exe = env::current_exe().context("could not locate current memory executable")?;
     let db = engine
@@ -2877,78 +7365,46 @@ fn attach_command(
         .canonicalize()
         .unwrap_or_else(|_| engine.store_path().to_path_buf());
     let root = env::current_dir()?;
-    let attach_dir = root.join(".memory.cpp").join("attach");
-    fs::create_dir_all(&attach_dir)?;
     let scoped_workspace = workspace
         .cloned()
         .or(current_workspace_name(engine)?)
         .or(load_app_config(engine.store_path())?.mcp.workspace);
-    let mut app_config = load_app_config(engine.store_path())?;
-    app_config.mcp.workspace = scoped_workspace.clone();
-    app_config.mcp.read_only = true;
-    app_config.mcp.redact_sensitive = true;
-    if app_config.mcp.audit_log.is_none() {
-        app_config.mcp.audit_log = Some(
-            engine
-                .store_path()
-                .parent()
-                .unwrap_or_else(|| Path::new(".memory.cpp"))
-                .join("audit")
-                .join("mcp-access.jsonl")
-                .display()
-                .to_string(),
-        );
-    }
-    save_app_config(engine.store_path(), &app_config)?;
-
-    match target {
-        AttachTarget::Cursor
-        | AttachTarget::Vscode
-        | AttachTarget::Codex
-        | AttachTarget::Claude => {
-            let mut args = vec![
-                "--db".to_string(),
-                db.to_string_lossy().to_string(),
-                "mcp".to_string(),
-            ];
-            if let Some(workspace) = &scoped_workspace {
-                args.push("--workspace".to_string());
-                args.push(workspace.clone());
-            }
-            let config = json!({
-                "mcpServers": {
-                    "memory-cpp": {
-                        "command": exe,
-                        "args": args
-                    }
-                }
-            });
-
-            let path = match target {
-                AttachTarget::Cursor => root.join(".cursor").join("mcp.json"),
-                AttachTarget::Vscode => root.join(".vscode").join("mcp.json"),
-                AttachTarget::Codex => root.join(".codex").join("mcp.json"),
-                AttachTarget::Claude => root.join(".claude").join("claude_desktop_config.json"),
-                AttachTarget::Ollama => unreachable!(),
-            };
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::write(&path, serde_json::to_string_pretty(&config)?)?;
-            println!("attached {:?} using {}", target, path.display());
+    if !dry_run && !print_config {
+        let mut app_config = load_app_config(engine.store_path())?;
+        app_config.mcp.workspace = scoped_workspace.clone();
+        app_config.mcp.read_only = true;
+        app_config.mcp.redact_sensitive = true;
+        if app_config.mcp.audit_log.is_none() {
+            app_config.mcp.audit_log = Some(
+                engine
+                    .store_path()
+                    .parent()
+                    .unwrap_or_else(|| Path::new(".memory.cpp"))
+                    .join("audit")
+                    .join("mcp-access.jsonl")
+                    .display()
+                    .to_string(),
+            );
         }
-        AttachTarget::Ollama => {
+        save_app_config(engine.store_path(), &app_config)?;
+    }
+
+    for target in expand_attach_targets(target) {
+        if matches!(target, AttachTarget::Ollama) {
+            let path = attach_config_path(&root, &target)?;
             let proxy_info = json!({
                 "base_url": format!("http://{host}:7332/v1"),
                 "upstream": upstream,
                 "db": db,
                 "workspace": scoped_workspace.clone(),
+                "note": "Start explicitly with `memory proxy`; attach does not auto-run long-lived services unless --start-proxy is passed.",
             });
-            let path = attach_dir.join("ollama-proxy.json");
-            fs::write(&path, serde_json::to_string_pretty(&proxy_info)?)?;
-            if start_proxy {
-                let _child = ProcessCommand::new(exe)
-                    .args([
+            emit_attach_plan(&target, &path, &proxy_info, dry_run, print_config)?;
+            if !dry_run && !print_config {
+                write_json_with_backup(&path, &proxy_info)?;
+                if start_proxy {
+                    let mut child = ProcessCommand::new(&exe);
+                    child.args([
                         "--db",
                         &db.to_string_lossy(),
                         "proxy",
@@ -2958,24 +7414,361 @@ fn attach_command(
                         upstream,
                         "--learn",
                         "--approval-required",
-                    ])
-                    .args(if let Some(workspace) = &scoped_workspace {
-                        vec!["--workspace", workspace.as_str()]
-                    } else {
-                        Vec::new()
-                    })
-                    .spawn()
-                    .context("failed to start background proxy")?;
-                println!("started proxy on http://{}:7332/v1", host);
+                    ]);
+                    if let Some(workspace) = &scoped_workspace {
+                        child.args(["--workspace", workspace.as_str()]);
+                    }
+                    let _child = child.spawn().context("failed to start background proxy")?;
+                    println!("started proxy on http://{}:7332/v1", host);
+                }
             }
-            println!("attached Ollama using {}", path.display());
+            continue;
         }
+
+        let config = build_attach_config(&exe, &db, scoped_workspace.as_ref());
+        let path = attach_config_path(&root, &target)?;
+        emit_attach_plan(&target, &path, &config, dry_run, print_config)?;
+        if !dry_run && !print_config {
+            write_json_with_backup(&path, &config)?;
+        }
+    }
+
+    if print_config {
+        return Ok(());
     }
 
     if let Some(workspace) = scoped_workspace {
         println!("workspace scope: {workspace}");
     }
     println!("health endpoint: http://{}:{}/health", host, port);
+    println!("MCP safety: read-only tools are enabled by default; memory writes require explicit approval.");
+    Ok(())
+}
+
+fn expand_attach_targets(target: &AttachTarget) -> Vec<AttachTarget> {
+    match target {
+        AttachTarget::All => vec![
+            AttachTarget::Cursor,
+            AttachTarget::Claude,
+            AttachTarget::Vscode,
+            AttachTarget::Codex,
+            AttachTarget::Continue,
+            AttachTarget::Ollama,
+        ],
+        other => vec![other.clone()],
+    }
+}
+
+fn attach_config_path(root: &Path, target: &AttachTarget) -> Result<PathBuf> {
+    let path = match target {
+        AttachTarget::Cursor => root.join(".cursor").join("mcp.json"),
+        AttachTarget::Vscode => root.join(".vscode").join("mcp.json"),
+        AttachTarget::Codex => root.join(".codex").join("mcp.json"),
+        AttachTarget::Claude => root.join(".claude").join("claude_desktop_config.json"),
+        AttachTarget::Continue => root.join(".continue").join("mcp.json"),
+        AttachTarget::Ollama => root
+            .join(".memory.cpp")
+            .join("attach")
+            .join("ollama-proxy.json"),
+        AttachTarget::All => return Err(anyhow!("all expands to concrete attach targets")),
+    };
+    Ok(path)
+}
+
+fn build_attach_config(exe: &Path, db: &Path, workspace: Option<&String>) -> Value {
+    let mut args = vec![
+        "--db".to_string(),
+        db.to_string_lossy().to_string(),
+        "mcp".to_string(),
+    ];
+    if let Some(workspace) = workspace {
+        args.push("--workspace".to_string());
+        args.push(workspace.clone());
+    }
+    json!({
+        "mcpServers": {
+            "memory-cpp": {
+                "command": exe,
+                "args": args,
+                "description": "Read-only local repo memory context for AI coding tools"
+            }
+        }
+    })
+}
+
+fn emit_attach_plan(
+    target: &AttachTarget,
+    path: &Path,
+    config: &Value,
+    dry_run: bool,
+    print_config: bool,
+) -> Result<()> {
+    if print_config {
+        println!("{}", serde_json::to_string_pretty(config)?);
+        return Ok(());
+    }
+    if dry_run {
+        println!("would attach {:?} at {}", target, path.display());
+    } else {
+        println!("attached {:?} using {}", target, path.display());
+    }
+    println!("undo: memory detach {:?}", target);
+    Ok(())
+}
+
+fn write_json_with_backup(path: &Path, value: &Value) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if path.exists() {
+        let backup = path.with_extension(format!("{}.bak", Utc::now().format("%Y%m%d%H%M%S")));
+        fs::copy(path, &backup)?;
+        println!("backup: {}", backup.display());
+    }
+    fs::write(path, serde_json::to_string_pretty(value)?)?;
+    Ok(())
+}
+
+fn detach_command(target: &AttachTarget, dry_run: bool, _yes: bool) -> Result<()> {
+    let root = env::current_dir()?;
+    for target in expand_attach_targets(target) {
+        let path = attach_config_path(&root, &target)?;
+        if dry_run {
+            println!("would detach {:?} from {}", target, path.display());
+            continue;
+        }
+        if !path.exists() {
+            println!("{:?} is not attached at {}", target, path.display());
+            continue;
+        }
+        let backup = path.with_extension(format!(
+            "{}.detached.bak",
+            Utc::now().format("%Y%m%d%H%M%S")
+        ));
+        fs::copy(&path, &backup)?;
+        fs::remove_file(&path)?;
+        println!("detached {:?}; backup kept at {}", target, backup.display());
+    }
+    Ok(())
+}
+
+fn attach_status_command(engine: &MemoryEngine, json_output: bool) -> Result<()> {
+    let root = env::current_dir()?;
+    let targets = expand_attach_targets(&AttachTarget::All)
+        .into_iter()
+        .map(|target| {
+            let path = attach_config_path(&root, &target).unwrap_or_default();
+            json!({
+                "target": format!("{target:?}").to_ascii_lowercase(),
+                "path": path,
+                "attached": path.exists(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let config = load_app_config(engine.store_path())?;
+    let report = json!({
+        "read_only": config.mcp.read_only,
+        "redaction": config.mcp.redact_sensitive,
+        "targets": targets,
+    });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("attach status");
+        println!("MCP read-only: {}", config.mcp.read_only);
+        println!("redaction: {}", config.mcp.redact_sensitive);
+        for target in report["targets"].as_array().into_iter().flatten() {
+            println!(
+                "  - {}: {} ({})",
+                target["target"].as_str().unwrap_or("target"),
+                if target["attached"].as_bool().unwrap_or(false) {
+                    "attached"
+                } else {
+                    "not attached"
+                },
+                target["path"].as_str().unwrap_or("")
+            );
+        }
+    }
+    Ok(())
+}
+
+fn attach_doctor_command(engine: &MemoryEngine) -> Result<()> {
+    attach_status_command(engine, false)?;
+    println!("doctor:");
+    println!("  - read-only MCP default should be true");
+    println!("  - detach with: memory detach cursor --dry-run");
+    println!("  - print config with: memory attach --print-config cursor");
+    Ok(())
+}
+
+fn attach_list_command() -> Result<()> {
+    println!("attach targets:");
+    for target in [
+        "cursor", "claude", "vscode", "codex", "continue", "ollama", "all",
+    ] {
+        println!("  - {target}");
+    }
+    Ok(())
+}
+
+fn public_watch_command(engine: &MemoryEngine, args: &ManualWatchCli) -> Result<()> {
+    let default_action = if args.once {
+        WatchAction::Once
+    } else if args.foreground {
+        WatchAction::Start
+    } else {
+        WatchAction::Status
+    };
+    let action = args.action.as_ref().unwrap_or(&default_action);
+    let base = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"));
+    let state_path = base.join("runtime").join("watch-state.json");
+    let cwd = env::current_dir()?;
+    let repo_root = resolve_repo_root(&cwd);
+
+    match action {
+        WatchAction::Start => {
+            fs::create_dir_all(state_path.parent().unwrap_or(base))?;
+            let state = json!({
+                "running": true,
+                "foreground": args.foreground,
+                "interval": args.interval,
+                "dry_run": args.dry_run,
+                "updated_at": Utc::now(),
+                "note": "lightweight coordinator; use --foreground or watch once for active observation"
+            });
+            fs::write(&state_path, serde_json::to_string_pretty(&state)?)?;
+            println!("memory watch marked active");
+            println!("state: {}", state_path.display());
+            if args.foreground {
+                if let Some(repo_root) = repo_root.as_ref() {
+                    git_watch_command(
+                        engine,
+                        repo_root,
+                        args.workspace.as_ref(),
+                        args.interval,
+                        args.once,
+                        32,
+                        args.dry_run,
+                        args.json,
+                    )?;
+                } else {
+                    println!("no git repository detected; watch will only report local status");
+                }
+            } else {
+                println!("run foreground loop with: memory watch start --foreground");
+            }
+        }
+        WatchAction::Stop => {
+            fs::create_dir_all(state_path.parent().unwrap_or(base))?;
+            fs::write(
+                &state_path,
+                serde_json::to_string_pretty(&json!({
+                    "running": false,
+                    "updated_at": Utc::now(),
+                }))?,
+            )?;
+            println!("memory watch stopped");
+        }
+        WatchAction::Status => {
+            let state = fs::read_to_string(&state_path)
+                .ok()
+                .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+                .unwrap_or_else(|| json!({"running": false}));
+            let git_state = repo_root.as_ref().map(|root| {
+                root.join(".memory.cpp")
+                    .join("git-watch")
+                    .join("state.json")
+            });
+            let report = json!({
+                "state": state,
+                "state_path": state_path,
+                "git_repo": repo_root,
+                "git_watch_state": git_state,
+                "terminal_paused": terminal_paused(engine).unwrap_or(false),
+                "local_only": true,
+            });
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("memory watch status");
+                println!(
+                    "running: {}",
+                    report["state"]["running"].as_bool().unwrap_or(false)
+                );
+                println!("local-only: yes");
+                println!("terminal paused: {}", report["terminal_paused"]);
+                println!("next: memory watch once --dry-run");
+            }
+        }
+        WatchAction::Once => {
+            if let Some(repo_root) = repo_root.as_ref() {
+                git_watch_command(
+                    engine,
+                    repo_root,
+                    args.workspace.as_ref(),
+                    args.interval,
+                    true,
+                    32,
+                    args.dry_run,
+                    args.json,
+                )?;
+            } else {
+                println!("no git repository detected from {}", cwd.display());
+                println!("watch once can still inspect terminal/status, but no git candidates were created");
+            }
+        }
+        WatchAction::Pause => {
+            fs::create_dir_all(state_path.parent().unwrap_or(base))?;
+            fs::write(
+                &state_path,
+                serde_json::to_string_pretty(&json!({
+                    "running": true,
+                    "paused": true,
+                    "updated_at": Utc::now(),
+                }))?,
+            )?;
+            if let Some(repo_root) = repo_root.as_ref() {
+                git_watch_action_command(repo_root, &GitWatchAction::Pause)?;
+            }
+            println!("memory watch paused");
+        }
+        WatchAction::Resume => {
+            fs::create_dir_all(state_path.parent().unwrap_or(base))?;
+            fs::write(
+                &state_path,
+                serde_json::to_string_pretty(&json!({
+                    "running": true,
+                    "paused": false,
+                    "updated_at": Utc::now(),
+                }))?,
+            )?;
+            if let Some(repo_root) = repo_root.as_ref() {
+                git_watch_action_command(repo_root, &GitWatchAction::Resume)?;
+            }
+            println!("memory watch resumed");
+        }
+        WatchAction::Doctor => {
+            println!("memory watch doctor");
+            println!("local-only: yes");
+            println!("network required: no");
+            println!(
+                "git repo: {}",
+                repo_root
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "not detected".to_string())
+            );
+            println!(
+                "terminal memory paused: {}",
+                terminal_paused(engine).unwrap_or(false)
+            );
+            println!("try: memory watch once --dry-run");
+        }
+    }
     Ok(())
 }
 
@@ -3171,6 +7964,183 @@ fn dev_command(engine: &MemoryEngine, command: &DevCommand) -> Result<()> {
             limit,
             json,
         } => dev_next_command(engine, workspace.as_ref(), *limit, *json),
+        DevCommand::RecallError {
+            error,
+            workspace,
+            limit,
+            json,
+        } => dev_recall_error_command(engine, error, workspace.as_ref(), *limit, *json),
+        DevCommand::TestFailures {
+            workspace,
+            limit,
+            json,
+        } => dev_test_failures_command(engine, workspace.as_ref(), *limit, *json),
+        DevCommand::RecallTest {
+            test,
+            workspace,
+            limit,
+            json,
+        } => dev_recall_test_command(engine, test, workspace.as_ref(), *limit, *json),
+        DevCommand::Context {
+            workspace,
+            target,
+            limit,
+            tokens,
+            verbose,
+            json,
+        } => dev_context_command(
+            engine,
+            workspace.as_ref(),
+            target,
+            *limit,
+            *tokens,
+            *verbose,
+            *json,
+        ),
+        DevCommand::Onboard {
+            workspace,
+            output,
+            save,
+        } => dev_onboard_command(engine, workspace.as_ref(), output, save.as_deref()),
+        DevCommand::ReadmeSuggest { workspace, json } => {
+            dev_readme_suggest_command(engine, workspace.as_ref(), *json)
+        }
+        DevCommand::Changelog {
+            workspace,
+            since,
+            json,
+        } => dev_changelog_command(engine, workspace.as_ref(), since.as_deref(), *json),
+        DevCommand::Health { workspace, json } => {
+            dev_health_command(engine, workspace.as_ref(), *json)
+        }
+        DevCommand::PrSummary { workspace, json } => {
+            dev_pr_summary_command(engine, workspace.as_ref(), *json)
+        }
+        DevCommand::Review { workspace, json } => {
+            dev_review_command(engine, workspace.as_ref(), *json)
+        }
+        DevCommand::Evening {
+            workspace,
+            verbose,
+            json,
+        } => dev_period_command(engine, workspace.as_ref(), "evening", 0, *verbose, *json),
+        DevCommand::Today {
+            workspace,
+            verbose,
+            json,
+        } => dev_period_command(engine, workspace.as_ref(), "today", 0, *verbose, *json),
+        DevCommand::Yesterday {
+            workspace,
+            verbose,
+            json,
+        } => dev_period_command(engine, workspace.as_ref(), "yesterday", 1, *verbose, *json),
+        DevCommand::Week {
+            workspace,
+            verbose,
+            json,
+        } => dev_week_command(engine, workspace.as_ref(), *verbose, *json),
+        DevCommand::Focus { workspace, json } => dev_focus_query(
+            engine,
+            workspace.as_ref(),
+            "current task next focus",
+            "focus",
+            *json,
+        ),
+        DevCommand::Tasks { workspace, json } => dev_focus_query(
+            engine,
+            workspace.as_ref(),
+            "todo task next plan",
+            "tasks",
+            *json,
+        ),
+        DevCommand::Blockers { workspace, json } => dev_focus_query(
+            engine,
+            workspace.as_ref(),
+            "blocker blocked failing error",
+            "blockers",
+            *json,
+        ),
+        DevCommand::Risks { workspace, json } => dev_focus_query(
+            engine,
+            workspace.as_ref(),
+            "risk risky limitation debt",
+            "risks",
+            *json,
+        ),
+        DevCommand::Cleanup { workspace, json } => dev_focus_query(
+            engine,
+            workspace.as_ref(),
+            "cleanup refactor stale debt",
+            "cleanup",
+            *json,
+        ),
+        DevCommand::DocsGap { workspace, json } => {
+            dev_docs_gap_command(engine, workspace.as_ref(), *json)
+        }
+        DevCommand::StaleDecisions { workspace, json } => dev_focus_query(
+            engine,
+            workspace.as_ref(),
+            "stale decision old alternative",
+            "stale decisions",
+            *json,
+        ),
+        DevCommand::StaleTodos { workspace, json } => {
+            dev_stale_todos_command(engine, workspace.as_ref(), *json)
+        }
+        DevCommand::ChangedFiles { workspace, json } => {
+            dev_changed_files_command(engine, workspace.as_ref(), *json)
+        }
+        DevCommand::HotFiles { workspace, json } => {
+            dev_hot_files_command(engine, workspace.as_ref(), *json)
+        }
+        DevCommand::CommonErrors { workspace, json } => dev_focus_query(
+            engine,
+            workspace.as_ref(),
+            "error failed panic exception",
+            "common errors",
+            *json,
+        ),
+        DevCommand::CommonCommands { workspace, json } => {
+            dev_common_commands_command(engine, workspace.as_ref(), *json)
+        }
+        DevCommand::Roadmap { workspace, json } => dev_focus_query(
+            engine,
+            workspace.as_ref(),
+            "roadmap next planned future",
+            "roadmap",
+            *json,
+        ),
+        DevCommand::ReleaseNotes {
+            workspace,
+            since,
+            json,
+        } => dev_changelog_command(engine, workspace.as_ref(), since.as_deref(), *json),
+        DevCommand::SetupGuide { workspace, json } => {
+            dev_setup_guide_command(engine, workspace.as_ref(), *json)
+        }
+        DevCommand::Architecture { workspace, json } => dev_focus_query(
+            engine,
+            workspace.as_ref(),
+            "architecture module storage command",
+            "architecture",
+            *json,
+        ),
+        DevCommand::ExplainCommand { cmd, json } => {
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "command": cmd,
+                        "explanation": command_explanation(cmd),
+                    }))?
+                );
+                Ok(())
+            } else {
+                println!("{cmd}");
+                println!("{}", command_explanation(cmd));
+                Ok(())
+            }
+        }
     }
 }
 
@@ -3209,26 +8179,72 @@ fn dev_morning_command(
         .collect::<Vec<_>>();
     let conflicts = engine.conflicts(Some(&scope), limit.min(10))?;
     let inbox = engine.inbox(Some(&scope), Some("pending"))?;
+    let repo_root = resolve_repo_root(&env::current_dir()?);
+    let repo_status = repo_root.as_deref().map(repo_status_report);
+    let todos = repo_root
+        .as_deref()
+        .map(|root| collect_todos(root, limit.max(8)))
+        .unwrap_or_default();
+    let commits = repo_root
+        .as_deref()
+        .and_then(|root| git_commit_records(root, Some("24h"), limit).ok())
+        .unwrap_or_default();
+    let failed_tests = recent_memories
+        .iter()
+        .filter(|memory| {
+            let lower = memory.summary.to_ascii_lowercase();
+            lower.contains("test") && (lower.contains("fail") || lower.contains("flaky"))
+        })
+        .take(limit)
+        .cloned()
+        .collect::<Vec<_>>();
     let next_step = recent_memories
         .iter()
         .find(|memory| matches!(memory.kind, MemoryKind::Task | MemoryKind::Decision))
         .map(|memory| memory.summary.clone())
         .or_else(|| conflicts.first().map(|conflict| conflict.reason.clone()))
         .or_else(|| inbox.first().map(|entry| entry.reason.clone()))
+        .or_else(|| {
+            repo_status.as_ref().and_then(|status| {
+                (status["dirty_count"].as_u64().unwrap_or(0) > 0)
+                    .then(|| "Review and commit the current uncommitted repo changes.".to_string())
+            })
+        })
         .unwrap_or_else(|| {
             "Review the latest project decisions and consolidate any pending review memories."
                 .to_string()
         });
+    let next_command = if !failed_tests.is_empty() {
+        "memory dev test-failures".to_string()
+    } else if !inbox.is_empty() {
+        "memory inbox".to_string()
+    } else if repo_status
+        .as_ref()
+        .and_then(|status| status["dirty_count"].as_u64())
+        .unwrap_or(0)
+        > 0
+    {
+        "git diff --stat".to_string()
+    } else {
+        "memory dev next".to_string()
+    };
 
     let report = json!({
         "workspace": scope,
         "since": since,
+        "what_was_i_doing": recent_memories.first().map(|memory| memory.summary.clone()),
+        "last_session_summary": recent_events.first().map(|event| event.body.clone()),
         "major_changes": recent_events,
+        "recent_commits": commits,
+        "open_todos": todos,
         "recent_decisions": decisions,
         "recent_bugs_and_fixes": bug_fixes,
+        "failed_tests": failed_tests,
+        "repo_status": repo_status,
         "open_conflicts": conflicts,
         "inbox": inbox,
         "suggested_next_work": next_step,
+        "next_recommended_command": next_command,
     });
 
     if json_output {
@@ -3238,6 +8254,12 @@ fn dev_morning_command(
             "morning recap for {}",
             report["workspace"].as_str().unwrap_or("default")
         );
+        if let Some(summary) = report["what_was_i_doing"].as_str() {
+            println!("what you were doing: {summary}");
+        }
+        if let Some(session) = report["last_session_summary"].as_str() {
+            println!("last session: {session}");
+        }
         println!("yesterday's major changes:");
         let changes = report["major_changes"]
             .as_array()
@@ -3286,11 +8308,55 @@ fn dev_morning_command(
                 .unwrap_or(0),
             report["inbox"].as_array().map(Vec::len).unwrap_or(0)
         );
+        if let Some(status) = report["repo_status"].as_object() {
+            println!(
+                "branch: {} | uncommitted files: {}",
+                status
+                    .get("branch")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown"),
+                status
+                    .get("dirty_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+            );
+        }
+        let todos = report["open_todos"].as_array().cloned().unwrap_or_default();
+        if !todos.is_empty() {
+            println!("open TODOs:");
+            for todo in todos.iter().take(limit.min(5)) {
+                println!(
+                    "  - {}:{} {}",
+                    todo["path"].as_str().unwrap_or("file"),
+                    todo["line"].as_u64().unwrap_or(0),
+                    todo["text"].as_str().unwrap_or("")
+                );
+            }
+        }
+        let failed_tests = report["failed_tests"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if !failed_tests.is_empty() {
+            println!("failed/flaky tests:");
+            for memory in failed_tests.iter().take(limit.min(5)) {
+                println!(
+                    "  - {}",
+                    memory["summary"].as_str().unwrap_or("test failure")
+                );
+            }
+        }
         println!(
             "suggested next work: {}",
             report["suggested_next_work"]
                 .as_str()
                 .unwrap_or("review project memory")
+        );
+        println!(
+            "next recommended command: {}",
+            report["next_recommended_command"]
+                .as_str()
+                .unwrap_or("memory dev next")
         );
     }
 
@@ -3323,11 +8389,67 @@ fn dev_resume_command(
             .limit(limit.max(6)),
         tokens,
     )?;
+    let repo_root = resolve_repo_root(&env::current_dir()?);
+    let relevant_files = repo_root
+        .as_deref()
+        .map(|root| {
+            git_stdout(root, &["log", "--name-only", "--pretty=format:", "-n", "8"])
+                .unwrap_or_default()
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .take(limit.max(6))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let related_commits = repo_root
+        .as_deref()
+        .and_then(|root| git_commit_records(root, Some("30d"), limit).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|commit| {
+            let haystack = format!(
+                "{} {} {}",
+                commit.subject,
+                commit.body,
+                commit.files.join(" ")
+            )
+            .to_ascii_lowercase();
+            resume_query
+                .split_whitespace()
+                .any(|token| haystack.contains(&token.to_ascii_lowercase()))
+        })
+        .take(limit)
+        .collect::<Vec<_>>();
+    let todos = repo_root
+        .as_deref()
+        .map(|root| collect_todos(root, limit.max(8)))
+        .unwrap_or_default();
+    let terminal_entries = read_terminal_entries(engine, 60).unwrap_or_default();
+    let failed_commands = terminal_entries
+        .iter()
+        .filter(|entry| entry.exit_code != 0)
+        .take(5)
+        .cloned()
+        .collect::<Vec<_>>();
+    let successful_commands = terminal_entries
+        .iter()
+        .filter(|entry| entry.exit_code == 0)
+        .take(5)
+        .cloned()
+        .collect::<Vec<_>>();
 
     let response = json!({
         "workspace": scope,
         "query": resume_query,
         "replay": replay,
+        "last_relevant_files_touched": relevant_files,
+        "related_commits": related_commits,
+        "related_todos": todos,
+        "failed_commands": failed_commands,
+        "successful_commands": successful_commands,
+        "related_memories": context.memories,
         "context": context,
         "recommended_next_step": context
             .memories
@@ -3361,6 +8483,44 @@ fn dev_resume_command(
                 .as_str()
                 .unwrap_or("continue from the current context")
         );
+        let files = response["last_relevant_files_touched"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if !files.is_empty() {
+            println!("\nlast relevant files touched:");
+            for file in files.iter().take(limit.min(8)) {
+                println!("  - {}", file.as_str().unwrap_or(""));
+            }
+        }
+        let commits = response["related_commits"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if !commits.is_empty() {
+            println!("\nrelated commits:");
+            for commit in commits.iter().take(limit.min(5)) {
+                println!(
+                    "  - {} {}",
+                    commit["short_sha"].as_str().unwrap_or("commit"),
+                    commit["subject"].as_str().unwrap_or("")
+                );
+            }
+        }
+        let failed = response["failed_commands"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if !failed.is_empty() {
+            println!("\nrecent failed commands:");
+            for command in failed.iter().take(3) {
+                println!(
+                    "  - [{}] {}",
+                    command["exit_code"].as_i64().unwrap_or(1),
+                    command["command"].as_str().unwrap_or("")
+                );
+            }
+        }
         println!("\ncontext block:\n{}", context.text);
     }
 
@@ -3394,14 +8554,37 @@ fn dev_explain_repo_command(
         .cloned()
         .collect::<Vec<_>>();
     let recent_commits = git_commit_records(&repo_root, Some("14d"), 5).unwrap_or_default();
+    let readme_brief = read_readme_brief(&repo_root)
+        .unwrap_or_else(|| "No README summary was detected yet.".to_string());
+    let important = important_files(&repo_root);
+    let commands = infer_run_commands(&repo_root);
+    let todos = collect_todos(&repo_root, 12);
+    let roadmap = recent_memories
+        .iter()
+        .filter(|memory| {
+            matches!(memory.kind, MemoryKind::Task)
+                || memory.summary.to_ascii_lowercase().contains("roadmap")
+                || memory.summary.to_ascii_lowercase().contains("next")
+        })
+        .take(6)
+        .cloned()
+        .collect::<Vec<_>>();
     let report = json!({
         "workspace": scope,
         "path": requested_path,
         "repo_root": repo_root,
+        "what_this_repo_does": readme_brief,
         "outline": outline,
+        "main_modules": outline,
+        "important_files": important,
+        "how_to_run_or_test": commands,
+        "data_storage": "local SQLite database under .memory.cpp/memory.db unless --db is provided",
+        "command_structure": "memory-cli uses a small manual pre-parser for launch commands plus Clap subcommands for the stable core",
         "recent_decisions": recent_decisions,
         "recent_bugs_and_fixes": recent_bugs,
         "recent_commits": recent_commits,
+        "known_risks": todos,
+        "current_roadmap": roadmap,
     });
 
     if json_output {
@@ -3419,6 +8602,38 @@ fn dev_explain_repo_command(
         for entry in report["outline"].as_array().cloned().unwrap_or_default() {
             println!("  - {}", entry.as_str().unwrap_or("item"));
         }
+        println!(
+            "what this repo does: {}",
+            report["what_this_repo_does"]
+                .as_str()
+                .unwrap_or("README summary unavailable")
+        );
+        println!("important files:");
+        for file in report["important_files"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+        {
+            println!("  - {}", file.as_str().unwrap_or(""));
+        }
+        println!("how to run/test:");
+        for command in report["how_to_run_or_test"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+        {
+            println!("  - {}", command.as_str().unwrap_or(""));
+        }
+        println!(
+            "data storage: {}",
+            report["data_storage"].as_str().unwrap_or("local SQLite")
+        );
+        println!(
+            "command structure: {}",
+            report["command_structure"]
+                .as_str()
+                .unwrap_or("CLI subcommands")
+        );
         println!("recent decisions:");
         let decisions = report["recent_decisions"]
             .as_array()
@@ -3455,6 +8670,21 @@ fn dev_explain_repo_command(
                 }
             }
         }
+        let risks = report["known_risks"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if !risks.is_empty() {
+            println!("known risks / TODOs:");
+            for risk in risks.iter().take(6) {
+                println!(
+                    "  - {}:{} {}",
+                    risk["path"].as_str().unwrap_or("file"),
+                    risk["line"].as_u64().unwrap_or(0),
+                    risk["text"].as_str().unwrap_or("")
+                );
+            }
+        }
     }
 
     Ok(())
@@ -3471,11 +8701,36 @@ fn dev_next_command(
     let conflicts = engine.conflicts(Some(&scope), limit.max(5))?;
     let recent = engine.list_recent(Some(&scope), limit.max(8))?;
     let mut suggestions = Vec::new();
+    let repo_root = resolve_repo_root(&env::current_dir()?);
+    let repo_status = repo_root.as_deref().map(repo_status_report);
+    let todos = repo_root
+        .as_deref()
+        .map(|root| collect_todos(root, limit.max(8)))
+        .unwrap_or_default();
 
+    if recent.iter().any(|memory| {
+        let lower = memory.summary.to_ascii_lowercase();
+        lower.contains("test") && (lower.contains("fail") || lower.contains("flaky"))
+    }) {
+        suggestions.push(
+            "Fix or explain the latest failing test with `memory dev test-failures`.".to_string(),
+        );
+    }
+    if repo_status
+        .as_ref()
+        .and_then(|status| status["dirty_count"].as_u64())
+        .unwrap_or(0)
+        > 0
+    {
+        suggestions.push(
+            "Review uncommitted changes with `git diff --stat`, then commit the coherent slice."
+                .to_string(),
+        );
+    }
     if let Some(item) = inbox.first() {
         suggestions.push(format!(
-            "Review pending inbox items starting with: {}",
-            item.reason
+            "Review candidate inbox items with `memory inbox explain {}`: {}",
+            item.id, item.reason
         ));
     }
     if let Some(conflict) = conflicts.first() {
@@ -3501,9 +8756,19 @@ fn dev_next_command(
             memory.summary
         ));
     }
-    if resolve_repo_root(&env::current_dir()?).is_some() {
-        suggestions.push("Refresh repo history with `memory git ingest --since 7d`.".to_string());
+    if !todos.is_empty() {
+        let todo = &todos[0];
+        suggestions.push(format!(
+            "Close or clarify TODO at {}:{}: {}",
+            todo.path, todo.line, todo.text
+        ));
     }
+    if repo_root.is_some() {
+        suggestions.push(
+            "Run `memory git watch --once` to capture new repo changes automatically.".to_string(),
+        );
+    }
+    suggestions.push("Run `memory map --type evolution --output html --save .memory.cpp/demo/evolution.html` for a shareable project evolution map.".to_string());
     if suggestions.is_empty() {
         suggestions.push(
             "Run `memory dev morning` and seed or import a few project memories to build momentum."
@@ -3517,6 +8782,8 @@ fn dev_next_command(
         "suggestions": suggestions,
         "pending_inbox": inbox.len(),
         "conflicts": conflicts.len(),
+        "repo_status": repo_status,
+        "open_todos": todos,
     });
 
     if json_output {
@@ -3547,6 +8814,981 @@ fn dev_next_command(
     }
 
     Ok(())
+}
+
+fn dev_recall_error_command(
+    engine: &MemoryEngine,
+    error: &str,
+    workspace: Option<&String>,
+    limit: usize,
+    json_output: bool,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let query_words = vec![error.to_string()];
+    let memories = engine.search(
+        build_recall_query(
+            &query_words,
+            Some(&scope),
+            &[MemoryKind::Bug],
+            &[],
+            limit,
+            true,
+            true,
+            engine,
+        )?
+        .include_inactive(true),
+    )?;
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&memories)?);
+    } else if memories.is_empty() {
+        println!("no previous fix memory found for {error}");
+        println!("tip: after fixing it, run `memory remember \"{error}: fixed by ...\" --kind bug --tags error,fix`");
+    } else {
+        println!("previous fixes for {error}:");
+        for item in memories {
+            println!("  - {}", item.memory.summary);
+            if !item.memory.content.is_empty() {
+                println!("    {}", item.memory.content);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn dev_test_failures_command(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    limit: usize,
+    json_output: bool,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let query_words = vec!["test failure flaky regression reproduce".to_string()];
+    let memories = engine.search(build_recall_query(
+        &query_words,
+        Some(&scope),
+        &[MemoryKind::Bug],
+        &[],
+        limit,
+        true,
+        true,
+        engine,
+    )?)?;
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&memories)?);
+    } else if memories.is_empty() {
+        println!("no test failure memories found");
+    } else {
+        println!("known test failures:");
+        for item in memories {
+            println!("  - {}", item.memory.summary);
+            println!("    score {:.2} | {}", item.score, item.reason);
+        }
+    }
+    Ok(())
+}
+
+fn dev_recall_test_command(
+    engine: &MemoryEngine,
+    test: &str,
+    workspace: Option<&String>,
+    limit: usize,
+    json_output: bool,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let query_words = vec![format!("{test} test failure flaky fix reproduce")];
+    let memories = engine.search(build_recall_query(
+        &query_words,
+        Some(&scope),
+        &[],
+        &[],
+        limit,
+        true,
+        true,
+        engine,
+    )?)?;
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&memories)?);
+    } else if memories.is_empty() {
+        println!("no memory found for test {test}");
+    } else {
+        println!("recall for test {test}:");
+        for item in memories {
+            println!("  - {}", item.memory.summary);
+        }
+    }
+    Ok(())
+}
+
+fn dev_context_command(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    target: &DevContextTarget,
+    limit: usize,
+    tokens: usize,
+    verbose: bool,
+    json_output: bool,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let repo_summary =
+        read_readme_brief(&repo_root).unwrap_or_else(|| "Repo summary unavailable.".to_string());
+    let status = repo_status_report(&repo_root);
+    let context = engine.context(
+        RecallQuery::new(
+            "current task recent decisions coding style important files known pitfalls commands",
+        )
+        .workspace(scope.clone())
+        .limit(limit),
+        tokens,
+    )?;
+    let commands = infer_run_commands(&repo_root);
+    let important = important_files(&repo_root);
+    let todos = collect_todos(&repo_root, if verbose { 16 } else { 6 });
+    let pitfalls = engine.search(
+        RecallQuery::new("pitfall bug error workaround risk")
+            .workspace(scope.clone())
+            .limit(if verbose { 8 } else { 4 })
+            .include_content(false),
+    )?;
+    let citations = context
+        .memories
+        .iter()
+        .take(if verbose { 10 } else { 5 })
+        .map(|item| {
+            let source = item.memory.attributes.source.as_ref();
+            json!({
+                "id": item.memory.id,
+                "summary": item.memory.summary,
+                "source_file": source.and_then(|source| source.source_file.clone()),
+                "source_commit": source.and_then(|source| source.source_commit.clone()),
+                "reason": item.reason,
+            })
+        })
+        .collect::<Vec<_>>();
+    let header = match target {
+        DevContextTarget::Cursor => "Cursor context pack",
+        DevContextTarget::Codex => "Codex context pack",
+        DevContextTarget::Claude => "Claude context pack",
+        DevContextTarget::Vscode => "VS Code context pack",
+        DevContextTarget::Continue => "Continue context pack",
+        DevContextTarget::Aider => "Aider context pack",
+        DevContextTarget::Copilot => "Copilot context pack",
+        DevContextTarget::Ollama => "Ollama context pack",
+        DevContextTarget::Openai => "OpenAI context pack",
+        DevContextTarget::SmallModel => "Small-model context pack",
+        DevContextTarget::LargeModel => "Large-model context pack",
+        DevContextTarget::Generic => "AI assistant context pack",
+    };
+    let todo_block = if todos.is_empty() {
+        "- No TODO/FIXME comments detected.".to_string()
+    } else {
+        todos
+            .iter()
+            .map(|todo| format!("- {}:{} {}", todo.path, todo.line, todo.text))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let pitfall_block = if pitfalls.is_empty() {
+        "- No pitfall memories found yet.".to_string()
+    } else {
+        pitfalls
+            .iter()
+            .map(|item| format!("- {}", item.memory.summary))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let citation_block = if citations.is_empty() {
+        "- No citations yet.".to_string()
+    } else {
+        citations
+            .iter()
+            .map(|item| {
+                format!(
+                    "- {} ({})",
+                    item["summary"].as_str().unwrap_or("memory"),
+                    item["source_file"].as_str().unwrap_or("memory store")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let extra = if verbose {
+        format!("\nKnown pitfalls:\n{pitfall_block}\n\nCitations:\n{citation_block}\n")
+    } else {
+        String::new()
+    };
+    let block = format!(
+        "{header}\n\nRepo summary:\n{repo_summary}\n\nCurrent branch: {}\nDirty files: {}\n\nImportant files:\n{}\n\nCommands to run:\n{}\n\nOpen TODOs:\n{}\n\nPrivacy/safety note:\n- memory.cpp stays local by default. Do not paste secrets into prompts.\n{extra}\nMemory context:\n{}",
+        status["branch"].as_str().unwrap_or("unknown"),
+        status["dirty_count"].as_u64().unwrap_or(0),
+        important.iter().map(|item| format!("- {item}")).collect::<Vec<_>>().join("\n"),
+        commands.iter().map(|item| format!("- {item}")).collect::<Vec<_>>().join("\n"),
+        todo_block,
+        context.text
+    );
+    let report = json!({
+        "workspace": scope,
+        "target": format!("{target:?}").to_ascii_lowercase(),
+        "repo_summary": repo_summary,
+        "status": status,
+        "important_files": important,
+        "commands": commands,
+        "todos": todos,
+        "pitfalls": pitfalls,
+        "citations": citations,
+        "verbose": verbose,
+        "context": context,
+        "block": block,
+    });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("{}", report["block"].as_str().unwrap_or(""));
+    }
+    Ok(())
+}
+
+fn public_context_command(engine: &MemoryEngine, args: &ManualContextCli) -> Result<()> {
+    let default_action = ContextAction::Build;
+    let action = args.action.as_ref().unwrap_or(&default_action);
+    let base = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"));
+    let context_dir = base.join("context");
+    match action {
+        ContextAction::Build | ContextAction::Refresh => {
+            if args.output.is_some() {
+                let rendered = context_pack_text(
+                    engine,
+                    args.workspace.as_ref(),
+                    &args.target,
+                    args.limit,
+                    args.budget,
+                    args.verbose,
+                    &args.format,
+                )?;
+                emit_or_save(&rendered, args.output.as_deref())?;
+            } else {
+                dev_context_command(
+                    engine,
+                    args.workspace.as_ref(),
+                    &args.target,
+                    args.limit,
+                    args.budget,
+                    args.verbose,
+                    args.json,
+                )?;
+            }
+            if args.copy {
+                println!("clipboard copy is not automatic in this release; select the output above or use --output.");
+            }
+        }
+        ContextAction::Write => {
+            let output = args.output.clone().unwrap_or_else(|| {
+                context_dir.join(format!(
+                    "{}.md",
+                    format!("{:?}", args.target).to_ascii_lowercase()
+                ))
+            });
+            let rendered = context_pack_text(
+                engine,
+                args.workspace.as_ref(),
+                &args.target,
+                args.limit,
+                args.budget,
+                args.verbose,
+                &args.format,
+            )?;
+            emit_or_save(&rendered, Some(&output))?;
+        }
+        ContextAction::Open => {
+            if let Some(path) = newest_file(&[context_dir.clone()], "md") {
+                println!("{path}");
+                let _ = open_with_os(&path);
+            } else {
+                println!("no context pack found yet");
+                println!("try: memory context write --for cursor");
+            }
+        }
+        ContextAction::Status => {
+            let latest = newest_file(&[context_dir.clone()], "md");
+            let report = json!({
+                "context_dir": context_dir,
+                "latest": latest,
+                "freshness": if latest.is_some() { "available" } else { "missing" },
+                "next": "memory context write --for cursor",
+            });
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("context pack status");
+                println!("folder: {}", report["context_dir"].as_str().unwrap_or(""));
+                println!("latest: {}", report["latest"].as_str().unwrap_or("none"));
+                println!("next: {}", report["next"].as_str().unwrap_or(""));
+            }
+        }
+        ContextAction::Diff => {
+            println!("context diff is lightweight in this release.");
+            println!("Write a pack, then compare it with your editor or git:");
+            println!("memory context write --for cursor --output .memory.cpp/context/cursor.md");
+        }
+        ContextAction::Explain => {
+            println!("context packs are short local briefings for AI coding tools.");
+            println!("They include repo summary, recent decisions, important files, commands, TODOs, and safety notes.");
+            println!("They stay local unless you paste or attach them yourself.");
+            println!("try: memory context write --for codex");
+        }
+    }
+    Ok(())
+}
+
+fn context_pack_text(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    target: &DevContextTarget,
+    limit: usize,
+    tokens: usize,
+    verbose: bool,
+    format: &str,
+) -> Result<String> {
+    let scope = required_workspace(engine, workspace)?;
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let status = repo_status_report(&repo_root);
+    let repo_summary =
+        read_readme_brief(&repo_root).unwrap_or_else(|| "Repo summary unavailable.".to_string());
+    let context = engine.context(
+        RecallQuery::new("current task decisions architecture commands errors fixes")
+            .workspace(scope.clone())
+            .limit(limit),
+        tokens,
+    )?;
+    let commands = infer_run_commands(&repo_root);
+    let todos = collect_todos(&repo_root, if verbose { 16 } else { 6 });
+    let important = important_files(&repo_root);
+    if format.eq_ignore_ascii_case("json") {
+        return Ok(serde_json::to_string_pretty(&json!({
+            "target": format!("{target:?}").to_ascii_lowercase(),
+            "workspace": scope,
+            "repo_summary": repo_summary,
+            "status": status,
+            "commands": commands,
+            "todos": todos,
+            "important_files": important,
+            "context": context,
+            "local_only": true,
+        }))?);
+    }
+    let mut out = String::new();
+    out.push_str(&format!(
+        "# {} context pack\n\n",
+        format!("{target:?}").to_ascii_lowercase()
+    ));
+    out.push_str("Local-first note: generated from local repo memory. Do not paste secrets.\n\n");
+    out.push_str("## Project summary\n");
+    out.push_str(&repo_summary);
+    out.push_str("\n\n## Current repo state\n");
+    out.push_str(&format!(
+        "- Branch: {}\n- Dirty files: {}\n",
+        status["branch"].as_str().unwrap_or("unknown"),
+        status["dirty_count"].as_u64().unwrap_or(0)
+    ));
+    out.push_str("\n## Important files\n");
+    for file in important {
+        out.push_str(&format!("- `{file}`\n"));
+    }
+    out.push_str("\n## Commands to run\n");
+    for command in commands {
+        out.push_str(&format!("- `{command}`\n"));
+    }
+    out.push_str("\n## Open TODOs\n");
+    if todos.is_empty() {
+        out.push_str("- No TODO/FIXME comments detected.\n");
+    } else {
+        for todo in todos {
+            out.push_str(&format!("- `{}`:{} {}\n", todo.path, todo.line, todo.text));
+        }
+    }
+    out.push_str("\n## Memory context\n");
+    out.push_str(&context.text);
+    out.push_str("\n\n## What not to do\n");
+    out.push_str("- Do not assume network or cloud sync is enabled.\n");
+    out.push_str("- Do not store secrets; use `.memoryignore` and redaction previews.\n");
+    Ok(out)
+}
+
+fn dev_onboard_command(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    output: &DevOnboardOutput,
+    save: Option<&Path>,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let decisions = engine.search(
+        RecallQuery::new("architecture decision why because")
+            .workspace(scope.clone())
+            .kind(MemoryKind::Decision)
+            .limit(8)
+            .include_content(true),
+    )?;
+    let bugs = engine.search(
+        RecallQuery::new("common error bug fix workaround")
+            .workspace(scope.clone())
+            .kind(MemoryKind::Bug)
+            .limit(8)
+            .include_content(true),
+    )?;
+    let report = json!({
+        "workspace": scope,
+        "repo_root": repo_root,
+        "overview": read_readme_brief(&repo_root),
+        "architecture": collect_repo_outline(&repo_root)?,
+        "important_files": important_files(&repo_root),
+        "commands": infer_run_commands(&repo_root),
+        "important_decisions": decisions,
+        "common_errors": bugs,
+        "known_risks": collect_todos(&repo_root, 12),
+        "next_tasks": engine.inbox(Some(&scope), Some("pending"))?,
+    });
+    let rendered = if matches!(output, DevOnboardOutput::Json) {
+        serde_json::to_string_pretty(&report)?
+    } else {
+        render_onboarding_markdown(&report)
+    };
+    emit_or_save(&rendered, save)?;
+    Ok(())
+}
+
+fn render_onboarding_markdown(report: &Value) -> String {
+    let mut out = String::new();
+    out.push_str("# Project onboarding\n\n");
+    out.push_str(&format!(
+        "Workspace: `{}`\n\n",
+        report["workspace"].as_str().unwrap_or("default")
+    ));
+    out.push_str("## Overview\n");
+    out.push_str(
+        report["overview"]
+            .as_str()
+            .unwrap_or("No overview detected."),
+    );
+    out.push_str("\n\n## How to run and test\n");
+    for command in report["commands"].as_array().cloned().unwrap_or_default() {
+        out.push_str(&format!("- `{}`\n", command.as_str().unwrap_or("")));
+    }
+    out.push_str("\n## Important files\n");
+    for file in report["important_files"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+    {
+        out.push_str(&format!("- `{}`\n", file.as_str().unwrap_or("")));
+    }
+    out.push_str("\n## Architecture\n");
+    for item in report["architecture"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+    {
+        out.push_str(&format!("- {}\n", item.as_str().unwrap_or("")));
+    }
+    out.push_str("\n## Important decisions\n");
+    for item in report["important_decisions"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+    {
+        out.push_str(&format!(
+            "- {}\n",
+            item["memory"]["summary"].as_str().unwrap_or("decision")
+        ));
+    }
+    out.push_str("\n## Common errors\n");
+    for item in report["common_errors"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+    {
+        out.push_str(&format!(
+            "- {}\n",
+            item["memory"]["summary"].as_str().unwrap_or("error")
+        ));
+    }
+    out.push_str("\n## Known risks and TODOs\n");
+    for item in report["known_risks"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+    {
+        out.push_str(&format!(
+            "- `{}`:{} {}\n",
+            item["path"].as_str().unwrap_or("file"),
+            item["line"].as_u64().unwrap_or(0),
+            item["text"].as_str().unwrap_or("")
+        ));
+    }
+    out
+}
+
+fn dev_readme_suggest_command(
+    _engine: &MemoryEngine,
+    _workspace: Option<&String>,
+    json_output: bool,
+) -> Result<()> {
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let readme = fs::read_to_string(repo_root.join("README.md")).unwrap_or_default();
+    let commands = infer_run_commands(&repo_root);
+    let mut suggestions = Vec::new();
+    if !readme.to_ascii_lowercase().contains("architecture") {
+        suggestions.push("Add or refresh an Architecture section.".to_string());
+    }
+    if !commands.iter().all(|cmd| readme.contains(cmd)) {
+        suggestions
+            .push("Document the current run/test commands detected from the repo.".to_string());
+    }
+    if repo_root.join(".memory.cpp").exists() && !readme.contains("memory dev morning") {
+        suggestions.push("Mention `memory dev morning` as the daily resume command.".to_string());
+    }
+    if suggestions.is_empty() {
+        suggestions.push("README looks aligned with the current developer workflow.".to_string());
+    }
+    let report = json!({ "repo_root": repo_root, "suggestions": suggestions });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("README suggestions:");
+        for suggestion in report["suggestions"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+        {
+            println!("  - {}", suggestion.as_str().unwrap_or(""));
+        }
+    }
+    Ok(())
+}
+
+fn dev_changelog_command(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    since: Option<&str>,
+    json_output: bool,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let commits = git_commit_records(&repo_root, since.or(Some("30d")), 80).unwrap_or_default();
+    let mut added = Vec::new();
+    let mut changed = Vec::new();
+    let mut fixed = Vec::new();
+    let mut docs = Vec::new();
+    for commit in &commits {
+        let lower = commit.subject.to_ascii_lowercase();
+        if lower.contains("fix") || lower.contains("bug") {
+            fixed.push(commit.subject.clone());
+        } else if commit.files.iter().any(|file| file.ends_with(".md")) {
+            docs.push(commit.subject.clone());
+        } else if lower.contains("add") || lower.contains("introduce") {
+            added.push(commit.subject.clone());
+        } else {
+            changed.push(commit.subject.clone());
+        }
+    }
+    let report = json!({
+        "workspace": scope,
+        "since": since.unwrap_or("30d"),
+        "added": added,
+        "changed": changed,
+        "fixed": fixed,
+        "docs": docs,
+        "breaking_changes": [],
+        "internal": commits.iter().map(|commit| commit.subject.clone()).collect::<Vec<_>>(),
+    });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "# Changelog since {}",
+            report["since"].as_str().unwrap_or("30d")
+        );
+        for section in ["added", "changed", "fixed", "docs", "internal"] {
+            println!("\n## {}", section);
+            let items = report[section].as_array().cloned().unwrap_or_default();
+            if items.is_empty() {
+                println!("- none");
+            } else {
+                for item in items.iter().take(20) {
+                    println!("- {}", item.as_str().unwrap_or(""));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn dev_health_command(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    json_output: bool,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let inbox = engine.inbox(Some(&scope), Some("pending"))?;
+    let decisions = engine.search(
+        RecallQuery::new("decision stale architecture")
+            .workspace(scope.clone())
+            .kind(MemoryKind::Decision)
+            .limit(8),
+    )?;
+    let test_failures = engine.search(
+        RecallQuery::new("test failure flaky")
+            .workspace(scope.clone())
+            .kind(MemoryKind::Bug)
+            .limit(8),
+    )?;
+    let docs_freshness = if repo_root.join("README.md").exists() {
+        "README present"
+    } else {
+        "README missing"
+    };
+    let report = json!({
+        "workspace": scope,
+        "repo_status": repo_status_report(&repo_root),
+        "docs_freshness": docs_freshness,
+        "test_status": if test_failures.is_empty() { "no remembered failures" } else { "remembered failures present" },
+        "known_flaky_areas": test_failures,
+        "unreviewed_memory_candidates": inbox.len(),
+        "stale_decisions": decisions,
+        "open_todos": collect_todos(&repo_root, 20),
+        "architecture_drift": "run `memory map --type architecture` and compare with the README architecture section",
+    });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("repo health for {scope}");
+        println!("docs: {}", report["docs_freshness"].as_str().unwrap_or(""));
+        println!("tests: {}", report["test_status"].as_str().unwrap_or(""));
+        println!(
+            "unreviewed candidates: {} | open TODOs: {}",
+            report["unreviewed_memory_candidates"].as_u64().unwrap_or(0),
+            report["open_todos"].as_array().map(Vec::len).unwrap_or(0)
+        );
+        println!("{}", report["architecture_drift"].as_str().unwrap_or(""));
+    }
+    Ok(())
+}
+
+fn dev_pr_summary_command(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    json_output: bool,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let diff_stat = git_stdout(&repo_root, &["diff", "--stat", "HEAD"]).unwrap_or_default();
+    let decisions = engine.search(
+        RecallQuery::new("related decision why changed")
+            .workspace(scope.clone())
+            .kind(MemoryKind::Decision)
+            .limit(6),
+    )?;
+    let report = json!({
+        "workspace": scope,
+        "what_changed": diff_stat,
+        "why_it_changed": decisions,
+        "risky_areas": collect_todos(&repo_root, 8),
+        "tests_to_run": infer_run_commands(&repo_root).into_iter().filter(|cmd| cmd.contains("test")).collect::<Vec<_>>(),
+        "docs_to_update": dev_readme_suggestions_value(&repo_root),
+    });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("PR summary");
+        println!(
+            "what changed:\n{}",
+            report["what_changed"].as_str().unwrap_or("no diff")
+        );
+        println!("tests to run:");
+        for command in report["tests_to_run"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+        {
+            println!("  - {}", command.as_str().unwrap_or(""));
+        }
+    }
+    Ok(())
+}
+
+fn dev_readme_suggestions_value(repo_root: &Path) -> Vec<String> {
+    let readme = fs::read_to_string(repo_root.join("README.md")).unwrap_or_default();
+    let mut suggestions = Vec::new();
+    if !readme.to_ascii_lowercase().contains("architecture") {
+        suggestions.push("architecture section may need an update".to_string());
+    }
+    if !readme.contains("memory dev") {
+        suggestions.push("developer workflow commands are not documented".to_string());
+    }
+    suggestions
+}
+
+fn dev_review_command(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    json_output: bool,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let memories = engine.search(
+        RecallQuery::new("code review style preference risk owner common mistake")
+            .workspace(scope.clone())
+            .limit(10)
+            .include_content(true),
+    )?;
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&memories)?);
+    } else {
+        println!("review memory for {scope}:");
+        if memories.is_empty() {
+            println!("  no review-specific memories yet");
+        } else {
+            for item in memories {
+                println!("  - {}", item.memory.summary);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn dev_period_command(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    label: &str,
+    days_ago: i64,
+    verbose: bool,
+    json_output: bool,
+) -> Result<()> {
+    day_recap_command(engine, workspace, days_ago, verbose, json_output)?;
+    if !json_output && label == "evening" {
+        println!("evening wrap-up: run memory dev changelog --since 1d if you want release notes.");
+    }
+    Ok(())
+}
+
+fn dev_week_command(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    verbose: bool,
+    json_output: bool,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let since = Utc::now() - ChronoDuration::days(7);
+    let events = engine
+        .timeline(Some(&scope), None, 200)?
+        .into_iter()
+        .filter(|event| event.created_at >= since)
+        .collect::<Vec<_>>();
+    let report = json!({
+        "workspace": scope,
+        "events": events,
+        "next": "memory dev next",
+    });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "week recap for {}",
+            report["workspace"].as_str().unwrap_or("default")
+        );
+        for event in report["events"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .take(if verbose { 20 } else { 8 })
+        {
+            println!(
+                "- {} ({})",
+                event["body"].as_str().unwrap_or("event"),
+                event["event_type"].as_str().unwrap_or("memory")
+            );
+        }
+        println!("next: memory dev next");
+    }
+    Ok(())
+}
+
+fn dev_focus_query(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    query: &str,
+    title: &str,
+    json_output: bool,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let memories = engine.search(
+        RecallQuery::new(query)
+            .workspace(scope.clone())
+            .limit(10)
+            .include_content(true),
+    )?;
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&memories)?);
+    } else if memories.is_empty() {
+        println!("no {title} memories found yet");
+        println!("try: memory dev morning");
+    } else {
+        println!("{title} for {scope}:");
+        for item in memories {
+            println!("  - {}", item.memory.summary);
+        }
+    }
+    Ok(())
+}
+
+fn dev_docs_gap_command(
+    _engine: &MemoryEngine,
+    _workspace: Option<&String>,
+    json_output: bool,
+) -> Result<()> {
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let suggestions = dev_readme_suggestions_value(&repo_root);
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&suggestions)?);
+    } else {
+        println!("docs gaps:");
+        for suggestion in suggestions {
+            println!("  - {suggestion}");
+        }
+    }
+    Ok(())
+}
+
+fn dev_stale_todos_command(
+    _engine: &MemoryEngine,
+    _workspace: Option<&String>,
+    json_output: bool,
+) -> Result<()> {
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let todos = collect_todos(&repo_root, 24);
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&todos)?);
+    } else if todos.is_empty() {
+        println!("no TODO/FIXME comments found");
+    } else {
+        println!("TODO/FIXME comments:");
+        for todo in todos {
+            println!("  - {}:{} {}", todo.path, todo.line, todo.text);
+        }
+    }
+    Ok(())
+}
+
+fn dev_changed_files_command(
+    _engine: &MemoryEngine,
+    _workspace: Option<&String>,
+    json_output: bool,
+) -> Result<()> {
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let status = repo_status_report(&repo_root);
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&status)?);
+    } else {
+        println!("changed files:");
+        for file in status["dirty_files"].as_array().into_iter().flatten() {
+            println!("  - {}", file.as_str().unwrap_or(""));
+        }
+    }
+    Ok(())
+}
+
+fn dev_hot_files_command(
+    _engine: &MemoryEngine,
+    _workspace: Option<&String>,
+    json_output: bool,
+) -> Result<()> {
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let files = git_hot_files(&repo_root, 12).unwrap_or_default();
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&files)?);
+    } else {
+        println!("hot files:");
+        for file in files {
+            println!("  - {file}");
+        }
+    }
+    Ok(())
+}
+
+fn dev_common_commands_command(
+    engine: &MemoryEngine,
+    _workspace: Option<&String>,
+    json_output: bool,
+) -> Result<()> {
+    let entries = read_terminal_entries(engine, 200)?;
+    let mut counts = HashMap::<String, usize>::new();
+    for entry in entries {
+        *counts.entry(entry.command).or_default() += 1;
+    }
+    let mut common = counts.into_iter().collect::<Vec<_>>();
+    common.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+    common.truncate(12);
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&common)?);
+    } else if common.is_empty() {
+        println!("no terminal command memory yet");
+        println!("try: memory terminal enable");
+    } else {
+        println!("common commands:");
+        for (command, count) in common {
+            println!("  - {command} ({count}x)");
+        }
+    }
+    Ok(())
+}
+
+fn dev_setup_guide_command(
+    _engine: &MemoryEngine,
+    _workspace: Option<&String>,
+    json_output: bool,
+) -> Result<()> {
+    let root = env::current_dir()?;
+    let detections = setup_detections(&root);
+    let commands = json!([
+        "memory setup --developer",
+        detections["test_command"]
+            .as_str()
+            .unwrap_or("memory dev morning"),
+        "memory doctor",
+        "memory dev context --for codex"
+    ]);
+    let report = json!({ "detections": detections, "commands": commands });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("setup guide:");
+        for command in report["commands"].as_array().into_iter().flatten() {
+            println!("  - {}", command.as_str().unwrap_or(""));
+        }
+    }
+    Ok(())
+}
+
+fn command_explanation(command: &str) -> &'static str {
+    if command.contains("dev morning") {
+        "Shows where you left off, recent work, open candidates, branch state, and a next command."
+    } else if command.contains("dev context") {
+        "Builds a local AI context pack for a coding assistant."
+    } else if command.contains("git watch") {
+        "Observes local Git changes and creates candidate memories with provenance."
+    } else if command.contains("terminal") {
+        "Manages opt-in local terminal command memory."
+    } else if command.contains("privacy") {
+        "Shows local storage, redaction, and purge controls."
+    } else if command.contains("map") {
+        "Builds a project map from memories, citations, and optional Git signals."
+    } else {
+        "A memory.cpp command. Try `memory examples` for short workflows."
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3777,9 +10019,597 @@ fn git_command(engine: &MemoryEngine, command: &GitCommand) -> Result<()> {
                 )?;
             }
         }
+        GitCommand::Watch {
+            action,
+            workspace,
+            interval_secs,
+            daemon,
+            once,
+            limit,
+            dry_run,
+            json,
+        } => {
+            if let Some(action) = action {
+                git_watch_action_command(&repo_root, action)?;
+            } else {
+                git_watch_command(
+                    engine,
+                    &repo_root,
+                    workspace.as_ref(),
+                    *interval_secs,
+                    *once || !*daemon,
+                    *limit,
+                    *dry_run,
+                    *json,
+                )?;
+            }
+        }
+        GitCommand::Today { json } => git_period_command(&repo_root, "24h", *json)?,
+        GitCommand::Yesterday { json } => git_period_command(&repo_root, "48h", *json)?,
+        GitCommand::Week { json } => git_period_command(&repo_root, "7d", *json)?,
+        GitCommand::Branch { branch, json } => {
+            git_branch_command(&repo_root, branch.as_deref(), *json)?
+        }
+        GitCommand::DiffMemory { workspace, json } => {
+            let scope = required_workspace(engine, workspace.as_ref())?;
+            let status = git_stdout(&repo_root, &["diff", "--stat"]).unwrap_or_default();
+            let report = json!({"workspace": scope, "diff_stat": status, "next": "memory git ingest --dry-run"});
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("{}", report["diff_stat"].as_str().unwrap_or("no diff"));
+                println!("next: memory git ingest --dry-run");
+            }
+        }
+        GitCommand::ReleaseNotes { since, json } => {
+            git_release_notes_command(&repo_root, since.as_deref(), *json)?
+        }
+        GitCommand::WhyFileChanged { file, json } => {
+            git_why_file_changed_command(&repo_root, file, *json)?
+        }
+        GitCommand::HotFiles { json } => {
+            let files = git_hot_files(&repo_root, 20)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&files)?);
+            } else {
+                for file in files {
+                    println!("{file}");
+                }
+            }
+        }
+        GitCommand::DependencyChanges { json } => {
+            git_filtered_changes(&repo_root, "dependency", *json)?
+        }
+        GitCommand::TestChanges { json } => git_filtered_changes(&repo_root, "test", *json)?,
+        GitCommand::DocsChanges { json } => git_filtered_changes(&repo_root, "docs", *json)?,
+        GitCommand::RiskyChanges { json } => git_filtered_changes(&repo_root, "risk", *json)?,
+        GitCommand::ForgottenChanges { json } => git_forgotten_changes(&repo_root, *json)?,
+        GitCommand::SummarizeCommit { sha, json } => git_summarize_commit(&repo_root, sha, *json)?,
+        GitCommand::SummarizeBranch { branch, json } => {
+            git_summarize_branch(&repo_root, branch, *json)?
+        }
+        GitCommand::CompareBranches { left, right, json } => {
+            git_compare_branches(&repo_root, left, right, *json)?
+        }
+        GitCommand::MapBranch {
+            branch,
+            workspace,
+            save,
+        } => {
+            let branch = branch
+                .clone()
+                .or_else(|| git_stdout(&repo_root, &["branch", "--show-current"]).ok());
+            println!("branch map: {}", branch.as_deref().unwrap_or("current"));
+            map_command(
+                engine,
+                Some(&repo_root),
+                branch.as_ref(),
+                workspace.as_ref(),
+                CliMapType::Evolution,
+                CliMapOutput::Html,
+                None,
+                None,
+                true,
+                true,
+                None,
+                None,
+                None,
+                save.as_deref(),
+            )?;
+        }
     }
 
     Ok(())
+}
+
+fn git_watch_command(
+    engine: &MemoryEngine,
+    repo_root: &Path,
+    workspace: Option<&String>,
+    interval_secs: u64,
+    once: bool,
+    limit: usize,
+    dry_run: bool,
+    json_output: bool,
+) -> Result<()> {
+    let scope = required_workspace(engine, workspace)?;
+    let watch_dir = repo_root.join(".memory.cpp").join("git-watch");
+    fs::create_dir_all(&watch_dir)?;
+    let state_file = watch_dir.join("state.json");
+    let mut previous = load_git_watch_state(&state_file).unwrap_or_else(|| json!({}));
+
+    loop {
+        let current_head = git_stdout(repo_root, &["rev-parse", "HEAD"]).unwrap_or_default();
+        let current_branch = git_stdout(repo_root, &["branch", "--show-current"])
+            .unwrap_or_else(|_| "unknown".to_string());
+        let previous_head = previous
+            .get("head")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let previous_branch = previous
+            .get("branch")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+
+        let mut observations = Vec::new();
+        if !previous_branch.is_empty() && previous_branch != current_branch {
+            observations.push(json!({
+                "kind": "branch_change",
+                "summary": format!("branch changed from {previous_branch} to {current_branch}"),
+            }));
+        }
+        if !previous_head.is_empty() && previous_head != current_head {
+            let range = format!("{previous_head}..{current_head}");
+            let commits = git_commit_records_for_range(repo_root, &range, limit)?;
+            for commit in commits {
+                observations.push(json!({
+                    "kind": "commit",
+                    "summary": commit.subject,
+                    "commit": commit.sha,
+                    "files": commit.files,
+                }));
+            }
+        }
+        if previous_head.is_empty() {
+            observations.push(json!({
+                "kind": "initialized",
+                "summary": "git watch baseline recorded",
+                "head": current_head,
+                "branch": current_branch,
+            }));
+        }
+
+        let candidates = observations
+            .iter()
+            .filter_map(|observation| {
+                build_git_watch_candidate(observation, repo_root, &current_head)
+            })
+            .collect::<Vec<_>>();
+        let mut stored = 0usize;
+        let mut queued = 0usize;
+        if !dry_run {
+            for candidate in &candidates {
+                let memory = extracted_candidate_to_memory(candidate, &scope, false);
+                if engine
+                    .remember_candidate(memory, &candidate.reason)?
+                    .is_some()
+                {
+                    stored += 1;
+                } else {
+                    queued += 1;
+                }
+            }
+            previous = json!({
+                "head": current_head,
+                "branch": current_branch,
+                "recorded_at": Utc::now(),
+            });
+            fs::write(&state_file, serde_json::to_string_pretty(&previous)?)?;
+        }
+
+        let report = json!({
+            "repo_root": repo_root,
+            "workspace": scope,
+            "dry_run": dry_run,
+            "observations": observations,
+            "candidates": candidates,
+            "stored": stored,
+            "queued": queued,
+            "state_file": state_file,
+        });
+        if json_output {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            println!(
+                "git watch observed {} change(s); stored={}, queued={}",
+                report["observations"].as_array().map(Vec::len).unwrap_or(0),
+                stored,
+                queued
+            );
+            println!("state: {}", report["state_file"].as_str().unwrap_or(""));
+        }
+
+        if once {
+            break;
+        }
+        thread::sleep(Duration::from_secs(interval_secs.max(2)));
+    }
+    Ok(())
+}
+
+fn git_watch_action_command(repo_root: &Path, action: &GitWatchAction) -> Result<()> {
+    let watch_dir = repo_root.join(".memory.cpp").join("git-watch");
+    fs::create_dir_all(&watch_dir)?;
+    let state_file = watch_dir.join("state.json");
+    let pause_file = watch_dir.join("paused");
+    match action {
+        GitWatchAction::Status { json } => {
+            let state = load_git_watch_state(&state_file).unwrap_or_else(|| json!({}));
+            let report = json!({
+                "state_file": state_file,
+                "paused": pause_file.exists(),
+                "state": state,
+            });
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("git watch status");
+                println!("paused: {}", report["paused"]);
+                println!("state: {}", report["state_file"].as_str().unwrap_or(""));
+            }
+        }
+        GitWatchAction::Pause => {
+            fs::write(&pause_file, Utc::now().to_rfc3339())?;
+            println!("git watch paused");
+        }
+        GitWatchAction::Resume => {
+            if pause_file.exists() {
+                fs::remove_file(&pause_file)?;
+            }
+            println!("git watch resumed");
+        }
+        GitWatchAction::ResetBaseline { json } => {
+            let head = git_stdout(repo_root, &["rev-parse", "HEAD"]).unwrap_or_default();
+            let branch = git_stdout(repo_root, &["branch", "--show-current"]).unwrap_or_default();
+            let state = json!({
+                "head": head,
+                "branch": branch,
+                "recorded_at": Utc::now(),
+            });
+            fs::write(&state_file, serde_json::to_string_pretty(&state)?)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&state)?);
+            } else {
+                println!("git watch baseline reset");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn git_period_command(repo_root: &Path, since: &str, json_output: bool) -> Result<()> {
+    let commits = git_commit_records(repo_root, Some(since), 32)?;
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&commits)?);
+    } else if commits.is_empty() {
+        println!("no commits found for {since}");
+    } else {
+        for commit in commits {
+            println!("{} {}", commit.short_sha, commit.subject);
+        }
+    }
+    Ok(())
+}
+
+fn git_branch_command(repo_root: &Path, branch: Option<&str>, json_output: bool) -> Result<()> {
+    let branch = branch.map(str::to_string).unwrap_or_else(|| {
+        git_stdout(repo_root, &["branch", "--show-current"]).unwrap_or_default()
+    });
+    let commits = git_commit_records_for_range(repo_root, &branch, 12).unwrap_or_default();
+    let report = json!({ "branch": branch, "commits": commits });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("branch: {}", report["branch"].as_str().unwrap_or("current"));
+        for commit in report["commits"].as_array().into_iter().flatten() {
+            println!("  - {}", commit["subject"].as_str().unwrap_or("commit"));
+        }
+    }
+    Ok(())
+}
+
+fn git_release_notes_command(
+    repo_root: &Path,
+    since: Option<&str>,
+    json_output: bool,
+) -> Result<()> {
+    let commits = git_commit_records(repo_root, since.or(Some("30d")), 80)?;
+    let mut markdown = String::from("# Release notes\n\n");
+    for heading in ["Added", "Changed", "Fixed", "Docs"] {
+        markdown.push_str(&format!("## {heading}\n"));
+        for commit in &commits {
+            let lower = commit.subject.to_ascii_lowercase();
+            let include = match heading {
+                "Fixed" => lower.contains("fix") || lower.contains("bug"),
+                "Docs" => commit.files.iter().any(|file| file.ends_with(".md")),
+                "Added" => lower.contains("add") || lower.contains("introduce"),
+                _ => true,
+            };
+            if include {
+                markdown.push_str(&format!("- {}\n", commit.subject));
+            }
+        }
+        markdown.push('\n');
+    }
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({"markdown": markdown, "commits": commits}))?
+        );
+    } else {
+        print!("{markdown}");
+    }
+    Ok(())
+}
+
+fn git_why_file_changed_command(repo_root: &Path, file: &Path, json_output: bool) -> Result<()> {
+    let file_arg = file.to_string_lossy().to_string();
+    let output = ProcessCommand::new("git")
+        .current_dir(repo_root)
+        .args(["log", "--follow", "--pretty=format:%h %s", "--", &file_arg])
+        .output()
+        .context("failed to run git log for file")?;
+    let lines = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .take(12)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({"file": file, "commits": lines}))?
+        );
+    } else if lines.is_empty() {
+        println!("no git history found for {}", file.display());
+    } else {
+        println!("why {} changed:", file.display());
+        for line in lines {
+            println!("  - {line}");
+        }
+    }
+    Ok(())
+}
+
+fn git_hot_files(repo_root: &Path, limit: usize) -> Result<Vec<String>> {
+    let output = ProcessCommand::new("git")
+        .current_dir(repo_root)
+        .args(["log", "--name-only", "--pretty=format:"])
+        .output()
+        .context("failed to run git log for hot files")?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    let mut counts = HashMap::<String, usize>::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            *counts.entry(trimmed.to_string()).or_default() += 1;
+        }
+    }
+    let mut files = counts.into_iter().collect::<Vec<_>>();
+    files.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+    Ok(files
+        .into_iter()
+        .take(limit)
+        .map(|(file, count)| format!("{file} ({count} changes)"))
+        .collect())
+}
+
+fn git_filtered_changes(repo_root: &Path, mode: &str, json_output: bool) -> Result<()> {
+    let commits = git_commit_records(repo_root, Some("30d"), 80)?;
+    let filtered = commits
+        .into_iter()
+        .filter(|commit| {
+            let joined =
+                format!("{} {}", commit.subject, commit.files.join(" ")).to_ascii_lowercase();
+            match mode {
+                "dependency" => {
+                    joined.contains("cargo.toml")
+                        || joined.contains("package.json")
+                        || joined.contains("lock")
+                }
+                "test" => joined.contains("test") || joined.contains("spec"),
+                "docs" => {
+                    joined.contains(".md") || joined.contains("readme") || joined.contains("docs")
+                }
+                "risk" => {
+                    joined.contains("unsafe")
+                        || joined.contains("auth")
+                        || joined.contains("schema")
+                        || joined.contains("migration")
+                }
+                _ => true,
+            }
+        })
+        .collect::<Vec<_>>();
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&filtered)?);
+    } else if filtered.is_empty() {
+        println!("no {mode} changes found");
+    } else {
+        for commit in filtered {
+            println!("{} {}", commit.short_sha, commit.subject);
+        }
+    }
+    Ok(())
+}
+
+fn git_forgotten_changes(repo_root: &Path, json_output: bool) -> Result<()> {
+    let status = repo_status_report(repo_root);
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&status)?);
+    } else {
+        println!("uncommitted or untracked changes:");
+        for file in status["dirty_files"].as_array().into_iter().flatten() {
+            println!("  - {}", file.as_str().unwrap_or(""));
+        }
+    }
+    Ok(())
+}
+
+fn git_summarize_commit(repo_root: &Path, sha: &str, json_output: bool) -> Result<()> {
+    let commits = git_commit_records_for_range(repo_root, sha, 1)?;
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&commits)?);
+    } else if let Some(commit) = commits.first() {
+        println!("{} {}", commit.short_sha, commit.subject);
+        if !commit.files.is_empty() {
+            println!("files: {}", commit.files.join(", "));
+        }
+    } else {
+        println!("commit not found: {sha}");
+    }
+    Ok(())
+}
+
+fn git_summarize_branch(repo_root: &Path, branch: &str, json_output: bool) -> Result<()> {
+    let commits = git_commit_records_for_range(repo_root, branch, 20)?;
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&commits)?);
+    } else {
+        println!("branch {branch}: {} commit(s)", commits.len());
+        for commit in commits {
+            println!("  - {} {}", commit.short_sha, commit.subject);
+        }
+    }
+    Ok(())
+}
+
+fn git_compare_branches(
+    repo_root: &Path,
+    left: &str,
+    right: &str,
+    json_output: bool,
+) -> Result<()> {
+    let range = format!("{left}..{right}");
+    let commits = git_commit_records_for_range(repo_root, &range, 64)?;
+    let diff = git_stdout(repo_root, &["diff", "--stat", &range]).unwrap_or_default();
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &json!({"range": range, "commits": commits, "diff": diff})
+            )?
+        );
+    } else {
+        println!("{range}");
+        println!("{diff}");
+        for commit in commits {
+            println!("  - {} {}", commit.short_sha, commit.subject);
+        }
+    }
+    Ok(())
+}
+
+fn load_git_watch_state(path: &Path) -> Option<Value> {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+}
+
+fn build_git_watch_candidate(
+    observation: &Value,
+    repo_root: &Path,
+    head: &str,
+) -> Option<ExtractedCandidate> {
+    let summary = observation.get("summary")?.as_str()?;
+    let files = observation
+        .get("files")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let lower = format!(
+        "{} {}",
+        summary.to_ascii_lowercase(),
+        files.join(" ").to_ascii_lowercase()
+    );
+    let kind = if ["fix", "bug", "fail", "error", "regression"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        MemoryKind::Bug
+    } else if ["architecture", "schema", "parser", "storage", "mcp"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        MemoryKind::Decision
+    } else {
+        MemoryKind::Workflow
+    };
+    let reason = format!(
+        "git watch observed {}",
+        observation["kind"].as_str().unwrap_or("change")
+    );
+    let mut tags = vec!["git-watch".to_string(), "git".to_string()];
+    if files
+        .iter()
+        .any(|file| file.eq_ignore_ascii_case("README.md"))
+    {
+        tags.push("docs".to_string());
+    }
+    if files
+        .iter()
+        .any(|file| file.contains("Cargo.toml") || file.contains("package.json"))
+    {
+        tags.push("dependency".to_string());
+    }
+    if files
+        .iter()
+        .any(|file| file.contains("test") || file.contains("spec"))
+    {
+        tags.push("test".to_string());
+    }
+    Some(ExtractedCandidate {
+        content: format!("Git watch: {summary}"),
+        kind,
+        confidence: 0.83,
+        reason,
+        tags,
+        source_file: files
+            .first()
+            .map(|file| repo_root.join(file).display().to_string()),
+        source_commit: (!head.is_empty()).then(|| head.to_string()),
+    })
+}
+
+fn git_commit_records_for_range(
+    root: &Path,
+    range: &str,
+    limit: usize,
+) -> Result<Vec<GitCommitRecord>> {
+    let output = ProcessCommand::new("git")
+        .current_dir(root)
+        .args([
+            "log",
+            range,
+            "--name-only",
+            "--pretty=format:%x1e%H%x1f%cI%x1f%s%x1f%b",
+            &format!("-n{}", limit.max(1)),
+        ])
+        .output()
+        .context("failed to run git log for watch range")?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    parse_git_log_records(&String::from_utf8_lossy(&output.stdout))
 }
 
 fn ignore_command(command: &IgnoreCommand) -> Result<()> {
@@ -3824,6 +10654,70 @@ fn ignore_command(command: &IgnoreCommand) -> Result<()> {
                 );
             }
         }
+        IgnoreCommand::List { root, json } => {
+            let root = root.clone().unwrap_or(env::current_dir()?);
+            let path = root.join(".memoryignore");
+            let lines = fs::read_to_string(&path)
+                .unwrap_or_default()
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            if *json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "path": path,
+                        "patterns": lines,
+                    }))?
+                );
+            } else {
+                println!("{}", path.display());
+                for line in lines {
+                    println!("  - {line}");
+                }
+            }
+        }
+        IgnoreCommand::Explain => {
+            println!(".memoryignore keeps files out of memory import and watch flows.");
+            println!(
+                "Use it for secrets, generated files, dependency folders, and noisy build output."
+            );
+            println!("try: memory ignore init");
+        }
+        IgnoreCommand::Add { pattern, root } => {
+            let root = root.clone().unwrap_or(env::current_dir()?);
+            let path = root.join(".memoryignore");
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let existing = fs::read_to_string(&path).unwrap_or_default();
+            if existing.lines().any(|line| line.trim() == pattern) {
+                println!("{pattern} is already in {}", path.display());
+            } else {
+                let mut updated = existing;
+                if !updated.ends_with('\n') && !updated.is_empty() {
+                    updated.push('\n');
+                }
+                updated.push_str(pattern);
+                updated.push('\n');
+                fs::write(&path, updated)?;
+                println!("added {pattern} to {}", path.display());
+            }
+        }
+        IgnoreCommand::Remove { pattern, root } => {
+            let root = root.clone().unwrap_or(env::current_dir()?);
+            let path = root.join(".memoryignore");
+            let existing = fs::read_to_string(&path).unwrap_or_default();
+            let lines = existing
+                .lines()
+                .filter(|line| line.trim() != pattern)
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            fs::write(&path, format!("{}\n", lines.join("\n")))?;
+            println!("removed {pattern} from {}", path.display());
+        }
     }
 
     Ok(())
@@ -3866,6 +10760,168 @@ fn collect_repo_outline(root: &Path) -> Result<Vec<String>> {
 
     entries.truncate(18);
     Ok(entries)
+}
+
+fn repo_status_report(root: &Path) -> Value {
+    let branch = git_stdout(root, &["branch", "--show-current"]).ok();
+    let status = git_stdout(root, &["status", "--short"]).unwrap_or_default();
+    let dirty_files = status
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect::<Vec<_>>();
+    let ahead_behind = git_stdout(root, &["status", "--short", "--branch"])
+        .ok()
+        .and_then(|value| value.lines().next().map(str::to_string));
+    let current_commit = git_stdout(root, &["rev-parse", "--short", "HEAD"]).ok();
+    json!({
+        "root": root,
+        "branch": branch.filter(|value| !value.is_empty()).unwrap_or_else(|| "unknown".to_string()),
+        "current_commit": current_commit,
+        "ahead_behind": ahead_behind,
+        "dirty_count": dirty_files.len(),
+        "dirty_files": dirty_files,
+    })
+}
+
+fn collect_todos(root: &Path, limit: usize) -> Vec<TodoHit> {
+    let files = collect_importable_files(root, true).unwrap_or_default();
+    let mut hits = Vec::new();
+    for file in files {
+        if hits.len() >= limit {
+            break;
+        }
+        let path = file.to_string_lossy();
+        if path.contains("\\target\\")
+            || path.contains("/target/")
+            || path.contains("\\.git\\")
+            || path.contains("/.git/")
+        {
+            continue;
+        }
+        let extension = file
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .unwrap_or_default();
+        let source_file = matches!(
+            extension.as_str(),
+            "rs" | "py" | "ts" | "tsx" | "js" | "jsx" | "c" | "cpp" | "h" | "hpp"
+        );
+        let Ok(raw) = fs::read_to_string(&file) else {
+            continue;
+        };
+        for (index, line) in raw.lines().enumerate() {
+            let lower = line.to_ascii_lowercase();
+            let trimmed = line.trim_start();
+            if source_file
+                && !trimmed.starts_with("//")
+                && !trimmed.starts_with('#')
+                && !trimmed.starts_with("/*")
+                && !trimmed.starts_with('*')
+            {
+                continue;
+            }
+            if line.contains("TODO:")
+                || line.contains("TODO ")
+                || line.contains("FIXME:")
+                || line.contains("FIXME ")
+                || lower.contains("todo:")
+                || lower.contains("fixme:")
+            {
+                hits.push(TodoHit {
+                    path: file
+                        .strip_prefix(root)
+                        .unwrap_or(&file)
+                        .display()
+                        .to_string(),
+                    line: index + 1,
+                    text: line.trim().to_string(),
+                });
+                if hits.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+    hits
+}
+
+fn important_files(root: &Path) -> Vec<String> {
+    [
+        "README.md",
+        "Cargo.toml",
+        "package.json",
+        "Makefile",
+        "justfile",
+        "scripts/smoke.sh",
+        "scripts/smoke.ps1",
+        ".github/workflows/ci.yml",
+        "crates/memory-cli/src/main.rs",
+        "crates/memory-core/src/lib.rs",
+    ]
+    .into_iter()
+    .filter(|path| root.join(path).exists())
+    .map(str::to_string)
+    .collect()
+}
+
+fn infer_run_commands(root: &Path) -> Vec<String> {
+    let mut commands = Vec::new();
+    if root.join("Cargo.toml").exists() {
+        commands.push("cargo run -- --help".to_string());
+        commands.push("cargo test".to_string());
+    }
+    if root.join("package.json").exists() {
+        commands.push("npm test".to_string());
+        commands.push("npm run dev".to_string());
+    }
+    if root.join("scripts/smoke.ps1").exists() {
+        commands.push("powershell -ExecutionPolicy Bypass -File scripts/smoke.ps1".to_string());
+    }
+    if root.join("scripts/smoke.sh").exists() {
+        commands.push("bash scripts/smoke.sh".to_string());
+    }
+    commands
+}
+
+fn read_readme_brief(root: &Path) -> Option<String> {
+    let readme = root.join("README.md");
+    let raw = fs::read_to_string(readme).ok()?;
+    let brief = raw
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty() && !trimmed.starts_with('#') && !trimmed.starts_with('!')
+        })
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string();
+    (!brief.is_empty()).then_some(brief)
+}
+
+fn git_stdout(root: &Path, args: &[&str]) -> Result<String> {
+    let output = ProcessCommand::new("git")
+        .current_dir(root)
+        .args(args)
+        .output()
+        .with_context(|| format!("failed to run git {}", args.join(" ")))?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn resolve_repo_root(path: &Path) -> Option<PathBuf> {
@@ -4176,7 +11232,10 @@ fn git_commit_records(
         ));
     }
 
-    let raw = String::from_utf8_lossy(&output.stdout);
+    parse_git_log_records(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_git_log_records(raw: &str) -> Result<Vec<GitCommitRecord>> {
     let mut commits = Vec::new();
     for chunk in raw.split('\u{1e}') {
         let chunk = chunk.trim();
@@ -4820,16 +11879,54 @@ fn doctor_command(
         ),
     });
 
-    checks.push(match git_repo_root(env::current_dir()?.as_path()) {
-        Some(root) => ok_check(
-            "git",
-            format!("detected git repository at {}", root.display()),
-        ),
+    let cwd = env::current_dir()?;
+    let repo_root = git_repo_root(cwd.as_path());
+    checks.push(match repo_root.clone() {
+        Some(root) => {
+            let status = repo_status_report(&root);
+            ok_check(
+                "git",
+                format!(
+                    "detected git repository at {}; branch {}; dirty files {}",
+                    root.display(),
+                    status["branch"].as_str().unwrap_or("unknown"),
+                    status["dirty_count"].as_u64().unwrap_or(0)
+                ),
+            )
+        }
         None => warn_check(
             "git",
             "no git repository detected from the current directory".to_string(),
             "run memory.cpp from a repo root to enrich maps and dev workflows",
         ),
+    });
+
+    let cursor_config = cwd.join(".cursor").join("mcp.json");
+    checks.push(if cursor_config.exists() {
+        ok_check(
+            "cursor-config",
+            format!("found {}", cursor_config.display()),
+        )
+    } else {
+        warn_check(
+            "cursor-config",
+            "Cursor MCP config not found in this repo".to_string(),
+            "run `memory attach cursor --workspace <name>`",
+        )
+    });
+
+    let claude_config = cwd.join(".claude").join("claude_desktop_config.json");
+    checks.push(if claude_config.exists() {
+        ok_check(
+            "claude-config",
+            format!("found {}", claude_config.display()),
+        )
+    } else {
+        warn_check(
+            "claude-config",
+            "Claude config not found in this repo".to_string(),
+            "run `memory attach claude --workspace <name>` if you use Claude Desktop",
+        )
     });
 
     let mcp = resolve_mcp_runtime_config(engine, workspace.as_ref(), false, false, None)?;
@@ -4931,6 +12028,66 @@ fn doctor_command(
         ),
     });
 
+    checks.push(match port_available("127.0.0.1:7332") {
+        Ok(true) => ok_check("proxy-port", "127.0.0.1:7332 is available".to_string()),
+        Ok(false) => warn_check(
+            "proxy-port",
+            "127.0.0.1:7332 is already in use".to_string(),
+            "run `memory status` to see whether the memory proxy is active",
+        ),
+        Err(err) => warn_check(
+            "proxy-port",
+            format!("could not test proxy port: {err}"),
+            "check local firewall or socket permissions",
+        ),
+    });
+
+    if let Some(root) = repo_root {
+        let state = root
+            .join(".memory.cpp")
+            .join("git-watch")
+            .join("state.json");
+        checks.push(if state.exists() {
+            ok_check(
+                "git-watch",
+                format!("watch baseline found at {}", state.display()),
+            )
+        } else {
+            warn_check(
+                "git-watch",
+                "no git watch baseline found".to_string(),
+                "run `memory git watch --once` to start automatic repo memory",
+            )
+        });
+    }
+
+    let smoke_ps1 = cwd.join("scripts").join("smoke.ps1");
+    let smoke_sh = cwd.join("scripts").join("smoke.sh");
+    checks.push(if smoke_ps1.exists() || smoke_sh.exists() {
+        ok_check(
+            "smoke-tests",
+            format!(
+                "found {}{}",
+                if smoke_ps1.exists() {
+                    "scripts/smoke.ps1"
+                } else {
+                    ""
+                },
+                if smoke_sh.exists() {
+                    " scripts/smoke.sh"
+                } else {
+                    ""
+                }
+            ),
+        )
+    } else {
+        warn_check(
+            "smoke-tests",
+            "no smoke-test script detected".to_string(),
+            "add scripts/smoke.ps1 or scripts/smoke.sh",
+        )
+    });
+
     let report = DoctorReport {
         store: db_path.display().to_string(),
         workspace,
@@ -4947,9 +12104,9 @@ fn doctor_command(
         }
         for check in &report.checks {
             let icon = match check.status.as_str() {
-                "ok" => "✓",
-                "warn" => "⚠",
-                _ => "✗",
+                "ok" => "[ok]",
+                "warn" => "[warn]",
+                _ => "[error]",
             };
             println!("{icon} {}: {}", check.name, check.detail);
             if let Some(suggestion) = &check.suggestion {
@@ -5041,6 +12198,8 @@ fn build_global_args(options: &EngineOptions) -> Vec<String> {
             EmbedderChoice::Hash => "hash",
             EmbedderChoice::Ollama => "ollama",
             EmbedderChoice::Openai => "openai",
+            EmbedderChoice::Fastembed => "fastembed",
+            EmbedderChoice::Onnx => "onnx",
         }
         .to_string(),
     );
@@ -5166,9 +12325,12 @@ fn terminate_pid(pid: u32) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
         let status = ProcessCommand::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .args(["/PID", &pid.to_string(), "/F"])
             .status()?;
         if !status.success() {
+            if !pid_is_alive(pid)? {
+                return Ok(());
+            }
             return Err(anyhow!("failed to stop pid {pid}"));
         }
         Ok(())
@@ -5815,38 +12977,64 @@ fn build_engine_from_options(options: &EngineOptions) -> Result<MemoryEngine> {
         .clone()
         .or_else(|| env::var_os("MEMORY_CPP_DB").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from(".memory.cpp/memory.db"));
+    let config = load_app_config(&db).unwrap_or_default();
+    let configured_provider = config
+        .embedding
+        .provider
+        .as_deref()
+        .and_then(parse_embedder_choice);
+    let effective_embedder = if matches!(options.embedder, EmbedderChoice::Hash) {
+        configured_provider.unwrap_or_else(|| options.embedder.clone())
+    } else {
+        options.embedder.clone()
+    };
+    let effective_endpoint = options
+        .endpoint
+        .clone()
+        .or_else(|| config.embedding.endpoint.clone());
+    let effective_model = options
+        .model
+        .clone()
+        .or_else(|| config.embedding.model.clone());
+    let effective_dimensions = config
+        .embedding
+        .dimensions
+        .unwrap_or(options.dimensions)
+        .max(32);
 
-    let embedder: SharedEmbedder = match options.embedder {
-        EmbedderChoice::Hash => Arc::new(HashEmbedder::new(options.dimensions)),
+    let embedder: SharedEmbedder = match effective_embedder {
+        EmbedderChoice::Hash => Arc::new(HashEmbedder::new(effective_dimensions)),
+        EmbedderChoice::Fastembed | EmbedderChoice::Onnx => {
+            Arc::new(FastEmbedOnnxEmbedder::new(effective_dimensions))
+        }
         EmbedderChoice::Ollama => Arc::new(OllamaEmbedder::new(
-            options
-                .endpoint
-                .clone()
-                .unwrap_or_else(|| "http://localhost:11434".to_string()),
-            options
-                .model
-                .clone()
-                .unwrap_or_else(|| "nomic-embed-text".to_string()),
-            options.dimensions,
+            effective_endpoint.unwrap_or_else(|| "http://localhost:11434".to_string()),
+            effective_model.unwrap_or_else(|| "nomic-embed-text".to_string()),
+            effective_dimensions,
         )),
         EmbedderChoice::Openai => {
             let api_key = env::var(&options.api_key_env).ok();
             Arc::new(OpenAiCompatibleEmbedder::new(
-                options
-                    .endpoint
-                    .clone()
-                    .unwrap_or_else(|| "https://api.openai.com".to_string()),
+                effective_endpoint.unwrap_or_else(|| "https://api.openai.com".to_string()),
                 api_key,
-                options
-                    .model
-                    .clone()
-                    .unwrap_or_else(|| "text-embedding-3-small".to_string()),
-                options.dimensions,
+                effective_model.unwrap_or_else(|| "text-embedding-3-small".to_string()),
+                effective_dimensions,
             ))
         }
     };
 
     MemoryEngine::open_with_embedder(db, embedder).context("failed to open memory engine")
+}
+
+fn parse_embedder_choice(value: &str) -> Option<EmbedderChoice> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "hash" => Some(EmbedderChoice::Hash),
+        "ollama" => Some(EmbedderChoice::Ollama),
+        "openai" | "openai-compatible" => Some(EmbedderChoice::Openai),
+        "fastembed" => Some(EmbedderChoice::Fastembed),
+        "onnx" | "fastembed-onnx" => Some(EmbedderChoice::Onnx),
+        _ => None,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6220,6 +13408,8 @@ fn emit_or_save(rendered: &str, save: Option<&Path>) -> Result<()> {
         }
         fs::write(path, rendered)?;
         println!("wrote {}", path.display());
+        println!("open it with: memory open --print map");
+        println!("next: memory map why \"MCP integration\"");
     } else {
         println!("{rendered}");
     }
@@ -6980,6 +14170,49 @@ mod tests {
     }
 
     #[test]
+    fn split_manual_args_detects_developer_fame_commands() {
+        for command in [
+            "add",
+            "search",
+            "inbox",
+            "embeddings",
+            "terminal",
+            "ci",
+            "welcome",
+            "setup",
+            "what",
+            "where",
+            "today",
+            "yesterday",
+            "week",
+            "next",
+            "status",
+            "explain",
+            "examples",
+            "open",
+            "fix",
+            "redact",
+            "config",
+            "attach",
+            "detach",
+            "watch",
+            "context",
+            "show-map",
+            "show-brain",
+            "show-timeline",
+            "show-context",
+            "show-inbox",
+            "privacy",
+            "ignore",
+        ] {
+            let raw = vec!["memory".to_string(), command.to_string()];
+            let parsed = split_manual_args(&raw).expect("split should succeed");
+            let (_, parsed_command, _) = parsed.expect("manual command should be detected");
+            assert_eq!(parsed_command, command);
+        }
+    }
+
+    #[test]
     fn split_manual_args_detects_git_command() {
         let raw = vec![
             "memory".to_string(),
@@ -7095,6 +14328,26 @@ mod tests {
     }
 
     #[test]
+    fn manual_git_watch_parses_once_and_dry_run() {
+        let parsed =
+            ManualGitCli::try_parse_from(["git", "watch", "--once", "--dry-run", "--limit", "3"])
+                .expect("parse should succeed");
+        match parsed.command {
+            GitCommand::Watch {
+                once,
+                dry_run,
+                limit,
+                ..
+            } => {
+                assert!(once);
+                assert!(dry_run);
+                assert_eq!(limit, 3);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn manual_ignore_check_parses_json_flag() {
         let parsed = ManualIgnoreCli::try_parse_from(["ignore", "check", "README.md", "--json"])
             .expect("parse should succeed");
@@ -7130,6 +14383,92 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn manual_dev_parses_context_target() {
+        let parsed =
+            ManualDevCli::try_parse_from(["dev", "context", "--for", "codex", "--tokens", "900"])
+                .expect("parse should succeed");
+        match parsed.command {
+            DevCommand::Context { target, tokens, .. } => {
+                assert!(matches!(target, DevContextTarget::Codex));
+                assert_eq!(tokens, 900);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn manual_inbox_and_embeddings_parse_polish_commands() {
+        let inbox =
+            ManualInboxCli::try_parse_from(["inbox", "approve-all", "--confidence-above", "0.91"])
+                .expect("parse should succeed");
+        match inbox.command.expect("subcommand") {
+            InboxCommand::ApproveAll {
+                confidence_above, ..
+            } => assert!((confidence_above - 0.91).abs() < f32::EPSILON),
+            other => panic!("unexpected inbox command: {other:?}"),
+        }
+
+        let embeddings = ManualEmbeddingsCli::try_parse_from(["embeddings", "set", "fastembed"])
+            .expect("parse should succeed");
+        match embeddings.command {
+            EmbeddingsCommand::Set { provider, .. } => {
+                assert!(matches!(provider, EmbedderChoice::Fastembed));
+            }
+            other => panic!("unexpected embeddings command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn manual_setup_parses_understandability_profiles() {
+        let parsed = ManualSetupCli::try_parse_from([
+            "setup",
+            "--developer",
+            "--ai-coding",
+            "--offline",
+            "--workspace",
+            "demo",
+            "--json",
+        ])
+        .expect("parse should succeed");
+        assert!(parsed.developer);
+        assert!(parsed.ai_coding);
+        assert!(parsed.offline);
+        assert_eq!(parsed.workspace.as_deref(), Some("demo"));
+        assert!(parsed.json);
+    }
+
+    #[test]
+    fn manual_privacy_parses_purge_and_status() {
+        let status = ManualPrivacyCli::try_parse_from(["privacy", "status", "--json"])
+            .expect("parse should succeed");
+        match status.command {
+            Some(PrivacyCommand::Status { json }) => assert!(json),
+            other => panic!("unexpected privacy command: {other:?}"),
+        }
+
+        let purge = ManualPrivacyCli::try_parse_from(["privacy", "purge", "--yes"])
+            .expect("parse should succeed");
+        match purge.command {
+            Some(PrivacyCommand::Purge { yes }) => assert!(yes),
+            other => panic!("unexpected privacy command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn manual_show_map_parses_save_shortcut() {
+        let parsed = ManualShowMapCli::try_parse_from([
+            "show-map",
+            "--workspace",
+            "demo",
+            "--save",
+            "map.html",
+        ])
+        .expect("parse should succeed");
+        assert_eq!(parsed.workspace.as_deref(), Some("demo"));
+        assert_eq!(parsed.save.as_path(), Path::new("map.html"));
     }
 
     #[test]
@@ -7185,5 +14524,452 @@ mod tests {
         assert!(matches!(candidate.kind, MemoryKind::Decision));
         assert!(candidate.confidence >= 0.7);
         assert!(candidate.tags.contains(&"decision".to_string()));
+    }
+
+    #[test]
+    fn manual_status_open_fix_redact_and_config_parse_release_flags() {
+        let status = ManualStatusCli::try_parse_from(["status", "--json", "--verbose"])
+            .expect("status parse should succeed");
+        assert!(status.json);
+        assert!(status.verbose);
+        assert!(!status.runtime);
+
+        let runtime = ManualStatusCli::try_parse_from(["status", "--runtime"])
+            .expect("runtime status parse should succeed");
+        assert!(runtime.runtime);
+
+        let open = ManualOpenCli::try_parse_from(["open", "--print", "docs"])
+            .expect("open parse should succeed");
+        assert_eq!(open.print_target.as_deref(), Some("docs"));
+
+        let fix = ManualFixCli::try_parse_from(["fix", "--apply", "--json"])
+            .expect("fix parse should succeed");
+        assert!(fix.apply);
+        assert!(fix.json);
+
+        let redact = ManualRedactCli::try_parse_from(["redact", "preview", "README.md", "--json"])
+            .expect("redact parse should succeed");
+        match redact.command {
+            RedactCommand::Preview { path, json } => {
+                assert_eq!(path, PathBuf::from("README.md"));
+                assert!(json);
+            }
+            other => panic!("unexpected redact command: {other:?}"),
+        }
+
+        let config = ManualConfigCli::try_parse_from(["config", "set", "profile", "developer"])
+            .expect("config parse should succeed");
+        match config.command.expect("config subcommand") {
+            ConfigCommand::Set { key, value } => {
+                assert_eq!(key, "profile");
+                assert_eq!(value, "developer");
+            }
+            other => panic!("unexpected config command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn manual_git_watch_lifecycle_actions_parse() {
+        let status = ManualGitCli::try_parse_from(["git", "watch", "status", "--json"])
+            .expect("git watch status parse should succeed");
+        match status.command {
+            GitCommand::Watch {
+                action: Some(GitWatchAction::Status { json }),
+                ..
+            } => assert!(json),
+            other => panic!("unexpected git watch command: {other:?}"),
+        }
+
+        for args in [
+            ["git", "watch", "pause"].as_slice(),
+            ["git", "watch", "resume"].as_slice(),
+            ["git", "watch", "reset-baseline"].as_slice(),
+        ] {
+            let parsed = ManualGitCli::try_parse_from(args).expect("git watch action should parse");
+            match parsed.command {
+                GitCommand::Watch {
+                    action: Some(GitWatchAction::Pause),
+                    ..
+                }
+                | GitCommand::Watch {
+                    action: Some(GitWatchAction::Resume),
+                    ..
+                }
+                | GitCommand::Watch {
+                    action: Some(GitWatchAction::ResetBaseline { .. }),
+                    ..
+                } => {}
+                other => panic!("unexpected git watch action: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn manual_terminal_ci_inbox_and_embeddings_parse_release_variants() {
+        let terminal_status = ManualTerminalCli::try_parse_from(["terminal", "status", "--json"])
+            .expect("terminal status parse should succeed");
+        assert!(matches!(
+            terminal_status.command,
+            TerminalCommand::Status { json: true }
+        ));
+
+        let record = ManualTerminalCli::try_parse_from([
+            "terminal",
+            "record",
+            "--command",
+            "cargo test -p memory-cli",
+            "--exit-code",
+            "1",
+            "--duration-ms",
+            "120",
+        ])
+        .expect("terminal record parse should succeed");
+        match record.command {
+            TerminalCommand::Record {
+                command,
+                exit_code,
+                duration_ms,
+                ..
+            } => {
+                assert_eq!(command, "cargo test -p memory-cli");
+                assert_eq!(exit_code, 1);
+                assert_eq!(duration_ms, Some(120));
+            }
+            other => panic!("unexpected terminal command: {other:?}"),
+        }
+
+        let shell = ManualTerminalCli::try_parse_from([
+            "terminal",
+            "install-shell",
+            "powershell",
+            "--json",
+        ])
+        .expect("terminal install-shell parse should succeed");
+        match shell.command {
+            TerminalCommand::InstallShell { shell, json } => {
+                assert_eq!(shell.as_deref(), Some("powershell"));
+                assert!(json);
+            }
+            other => panic!("unexpected terminal shell command: {other:?}"),
+        }
+
+        let suggest =
+            ManualTerminalCli::try_parse_from(["terminal", "suggest", "how did I run tests?"])
+                .expect("terminal suggest parse should succeed");
+        assert!(matches!(suggest.command, TerminalCommand::Suggest { .. }));
+
+        let privacy = ManualTerminalCli::try_parse_from(["terminal", "privacy", "--json"])
+            .expect("terminal privacy parse should succeed");
+        assert!(matches!(
+            privacy.command,
+            TerminalCommand::Privacy { json: true }
+        ));
+
+        let ci = ManualCiCli::try_parse_from([
+            "ci",
+            "explain-failure",
+            "auth_refresh_retries",
+            "--workspace",
+            "demo",
+            "--json",
+        ])
+        .expect("ci explain-failure parse should succeed");
+        match ci.command {
+            CiCommand::ExplainFailure {
+                query,
+                workspace,
+                json,
+                ..
+            } => {
+                assert_eq!(query.as_deref(), Some("auth_refresh_retries"));
+                assert_eq!(workspace.as_deref(), Some("demo"));
+                assert!(json);
+            }
+            other => panic!("unexpected ci command: {other:?}"),
+        }
+
+        let ci_report = ManualCiCli::try_parse_from(["ci", "report", "--output", "ci.md"])
+            .expect("ci report parse should succeed");
+        assert!(matches!(ci_report.command, CiCommand::Report { .. }));
+
+        let ci_comment =
+            ManualCiCli::try_parse_from(["ci", "pr-comment", "--output", "comment.md"])
+                .expect("ci pr-comment parse should succeed");
+        assert!(matches!(ci_comment.command, CiCommand::PrComment { .. }));
+
+        let reject = ManualInboxCli::try_parse_from([
+            "inbox",
+            "reject",
+            "candidate-1",
+            "--reason",
+            "duplicate",
+        ])
+        .expect("inbox reject parse should succeed");
+        match reject.command.expect("inbox subcommand") {
+            InboxCommand::Reject { id, reason } => {
+                assert_eq!(id, "candidate-1");
+                assert_eq!(reason.as_deref(), Some("duplicate"));
+            }
+            other => panic!("unexpected inbox reject command: {other:?}"),
+        }
+
+        for args in [
+            ["inbox", "list", "--simple"].as_slice(),
+            ["inbox", "list", "--important"].as_slice(),
+            ["inbox", "list", "--risky"].as_slice(),
+        ] {
+            let parsed = ManualInboxCli::try_parse_from(args).expect("inbox list should parse");
+            assert!(matches!(parsed.command, Some(InboxCommand::List { .. })));
+        }
+
+        let review = ManualInboxCli::try_parse_from(["inbox", "review", "--json"])
+            .expect("inbox review should parse");
+        assert!(matches!(
+            review.command,
+            Some(InboxCommand::Review { json: true, .. })
+        ));
+
+        let rule = ManualInboxCli::try_parse_from([
+            "inbox",
+            "rules",
+            "add",
+            "docs/**",
+            "--action",
+            "review",
+            "--confidence-above",
+            "0.8",
+        ])
+        .expect("inbox rules add should parse");
+        assert!(matches!(
+            rule.command,
+            Some(InboxCommand::Rules {
+                command: Some(InboxRulesCommand::Add { .. })
+            })
+        ));
+
+        let migrate = ManualEmbeddingsCli::try_parse_from([
+            "embeddings",
+            "migrate",
+            "--to",
+            "fastembed",
+            "--dry-run",
+        ])
+        .expect("embeddings migrate parse should succeed");
+        match migrate.command {
+            EmbeddingsCommand::Migrate {
+                provider, dry_run, ..
+            } => {
+                assert!(matches!(provider, EmbedderChoice::Fastembed));
+                assert!(dry_run);
+            }
+            other => panic!("unexpected embeddings command: {other:?}"),
+        }
+
+        let explain = ManualEmbeddingsCli::try_parse_from(["embeddings", "explain"])
+            .expect("embeddings explain parse should succeed");
+        assert!(matches!(explain.command, EmbeddingsCommand::Explain));
+    }
+
+    #[test]
+    fn manual_public_adoption_commands_parse() {
+        let attach =
+            ManualAttachCli::try_parse_from(["attach", "--dry-run", "--print-config", "continue"])
+                .expect("attach parse should succeed");
+        assert!(matches!(attach.target, AttachTarget::Continue));
+        assert!(attach.dry_run);
+        assert!(attach.print_config);
+
+        let detach = ManualDetachCli::try_parse_from(["detach", "all", "--dry-run"])
+            .expect("detach parse should succeed");
+        assert!(matches!(detach.target, AttachTarget::All));
+        assert!(detach.dry_run);
+
+        let watch = ManualWatchCli::try_parse_from(["watch", "once", "--dry-run", "--json"])
+            .expect("watch parse should succeed");
+        assert!(matches!(watch.action, Some(WatchAction::Once)));
+        assert!(watch.dry_run);
+        assert!(watch.json);
+
+        let context = ManualContextCli::try_parse_from([
+            "context",
+            "write",
+            "--for",
+            "cursor",
+            "--output",
+            "cursor.md",
+        ])
+        .expect("context parse should succeed");
+        assert!(matches!(context.action, Some(ContextAction::Write)));
+        assert!(matches!(context.target, DevContextTarget::Cursor));
+        assert_eq!(context.output.as_deref(), Some(Path::new("cursor.md")));
+    }
+
+    #[test]
+    fn manual_privacy_config_ignore_and_search_parse_new_variants() {
+        let privacy = ManualPrivacyCli::try_parse_from(["privacy", "receipts", "--json"])
+            .expect("privacy receipts parse should succeed");
+        assert!(matches!(
+            privacy.command,
+            Some(PrivacyCommand::Receipts { json: true })
+        ));
+
+        let config_path =
+            ManualConfigCli::try_parse_from(["config", "path"]).expect("config path parses");
+        assert!(matches!(config_path.command, Some(ConfigCommand::Path)));
+        let config_profiles = ManualConfigCli::try_parse_from(["config", "profiles"])
+            .expect("config profiles parses");
+        assert!(matches!(
+            config_profiles.command,
+            Some(ConfigCommand::Profiles)
+        ));
+
+        let ignore_add = ManualIgnoreCli::try_parse_from(["ignore", "add", "*.secret"])
+            .expect("ignore add parses");
+        assert!(matches!(ignore_add.command, IgnoreCommand::Add { .. }));
+        let ignore_remove = ManualIgnoreCli::try_parse_from(["ignore", "remove", "*.secret"])
+            .expect("ignore remove parses");
+        assert!(matches!(
+            ignore_remove.command,
+            IgnoreCommand::Remove { .. }
+        ));
+
+        let recall = ManualRecallCli::try_parse_from([
+            "search",
+            "workflow",
+            "--profile",
+            "terminal",
+            "--explain",
+            "--json",
+        ])
+        .expect("search profile parses");
+        assert!(matches!(recall.profile, Some(SearchProfile::Terminal)));
+        assert!(recall.explain);
+        assert!(recall.json);
+    }
+
+    #[test]
+    fn manual_dev_context_parses_generic_budget_and_verbose() {
+        let parsed = ManualDevCli::try_parse_from([
+            "dev",
+            "context",
+            "--for",
+            "generic",
+            "--budget",
+            "2000",
+            "--verbose",
+        ])
+        .expect("dev context parse should succeed");
+        match parsed.command {
+            DevCommand::Context {
+                target,
+                tokens,
+                verbose,
+                ..
+            } => {
+                assert!(matches!(target, DevContextTarget::Generic));
+                assert_eq!(tokens, 2000);
+                assert!(verbose);
+            }
+            other => panic!("unexpected dev context command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn developer_ready_docs_recipes_examples_and_website_exist() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for path in [
+            "docs/quickstart.md",
+            "docs/install.md",
+            "docs/uninstall.md",
+            "docs/upgrade.md",
+            "docs/first-five-minutes.md",
+            "docs/core-concepts.md",
+            "docs/dev-workflow.md",
+            "docs/git-memory.md",
+            "docs/terminal-memory.md",
+            "docs/ai-context.md",
+            "docs/context-packs.md",
+            "docs/maps.md",
+            "docs/inbox.md",
+            "docs/doctor.md",
+            "docs/privacy.md",
+            "docs/safety.md",
+            "docs/config.md",
+            "docs/ci-memory.md",
+            "docs/watch.md",
+            "docs/faq.md",
+            "docs/examples.md",
+            "docs/troubleshooting.md",
+            "docs/troubleshooting-install.md",
+            "docs/architecture.md",
+            "docs/roadmap.md",
+            "docs/changelog.md",
+            "docs/launch-checklist.md",
+            "docs/integrations/cursor.md",
+            "docs/integrations/claude.md",
+            "docs/integrations/vscode.md",
+            "docs/integrations/codex.md",
+            "docs/integrations/continue.md",
+            "docs/integrations/ollama.md",
+            "docs/integrations/mcp.md",
+            "docs/recipes/use-with-cursor.md",
+            "docs/recipes/use-with-codex.md",
+            "docs/recipes/use-with-claude.md",
+            "docs/recipes/resume-work-after-weekend.md",
+            "docs/recipes/generate-project-map.md",
+            "docs/recipes/remember-terminal-commands.md",
+            "docs/recipes/recover-a-fix.md",
+            "docs/recipes/prepare-a-pr.md",
+            "docs/recipes/private-local-setup.md",
+            "docs/recipes/offline-setup.md",
+            "docs/recipes/understand-a-new-repo.md",
+            "docs/recipes/clean-up-memory.md",
+            "docs/recipes/fix-ci-failure.md",
+            "docs/recipes/write-release-notes.md",
+            "docs/recipes/review-a-pr.md",
+            "docs/recipes/explain-a-codebase.md",
+            "docs/recipes/create-ai-context-pack.md",
+            "docs/recipes/restore-after-interruption.md",
+            "docs/recipes/automatic-repo-memory.md",
+            "docs/recipes/review-memory-candidates.md",
+            "examples/dev-morning.md",
+            "examples/dev-evening.md",
+            "examples/dev-next.md",
+            "examples/yesterday.md",
+            "examples/week.md",
+            "examples/explain-repo.md",
+            "examples/cursor-context.md",
+            "examples/codex-context.md",
+            "examples/claude-context.md",
+            "examples/generic-context.md",
+            "examples/project-map.html",
+            "examples/project-map.md",
+            "examples/project-map.mmd",
+            "examples/privacy-status.md",
+            "examples/doctor.md",
+            "examples/fix.md",
+            "examples/inbox-candidate.md",
+            "examples/terminal-search.md",
+            "examples/terminal-commands.md",
+            "examples/ci-failure.md",
+            "examples/git-summary.md",
+            "examples/git-watch.md",
+            "examples/readme-suggestion.md",
+            "examples/changelog.md",
+            "examples/pr-summary.md",
+            "examples/review.md",
+            "examples/health.md",
+            "examples/attach-cursor.md",
+            "examples/attach-ollama.md",
+            "examples/status.md",
+            "examples/today.md",
+            "examples/next.md",
+            "website/index.html",
+            "website/styles.css",
+            "website/app.js",
+            "website/pages/integrations.html",
+        ] {
+            assert!(root.join(path).exists(), "missing {path}");
+        }
     }
 }

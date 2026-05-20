@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="memory.cpp helps your repo remember what happened, why it changed, and what to do next locally, safely, and simply.">
+  <meta property="og:title" content="memory.cpp - Your repo remembers">
+  <meta property="og:description" content="Local repo memory for developers and AI coding tools.">
+  <meta property="og:image" content="assets/og.svg">
+  <title>memory.cpp - Your repo remembers</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="index.html"><span class="dot"></span>memory.cpp</a>
+    <nav><a href="pages/quickstart.html">Quickstart</a><a href="pages/cli.html">CLI</a><a href="pages/recipes.html">Recipes</a><a href="pages/integrations.html">Integrations</a><a href="pages/safety-privacy.html">Privacy</a><button id="themeToggle" type="button">Dark mode</button></nav>
+  </header>
+  <main>
+    <section class="desktop-hero">
+      <aside class="folder-dock" aria-label="Feature folders">
+        <a href="pages/dev-workflows.html" class="folder amber"><span></span>Dev Morning</a>
+        <a href="pages/ai-assistant-integration.html" class="folder violet"><span></span>AI Context</a>
+        <a href="pages/memory-map.html" class="folder mint"><span></span>Project Maps</a>
+        <a href="pages/safety-privacy.html" class="folder rose"><span></span>Privacy</a>
+      </aside>
+      <section class="window hero-window">
+        <div class="window-bar"><span></span><span></span><span></span><strong>local-repo-memory</strong></div>
+        <div class="window-body">
+          <p class="eyebrow">Local-first engineering memory</p>
+          <h1>Your repo remembers.</h1>
+          <p class="lede">memory.cpp helps your repo remember what happened, why it changed, and what to do next - locally, safely, and simply.</p>
+          <div class="hero-commands">
+            <code>memory dev morning</code>
+            <code>memory dev context --for cursor</code>
+            <code>memory map --type evolution --output html</code>
+          </div>
+          <div class="actions"><a class="button primary" href="pages/install.html">Install</a><a class="button" href="pages/quickstart.html">Start in 5 minutes</a><a class="button" href="https://github.com/KirtiRamchandani/memory.cpp">Star on GitHub</a></div>
+        </div>
+      </section>
+      <section class="window terminal-window">
+        <div class="window-bar"><span></span><span></span><span></span><strong>demo.sh</strong></div>
+        <pre class="terminal"><code>$ memory setup --developer
+$ memory dev morning
+$ memory dev context --for cursor
+$ memory show-map</code></pre>
+      </section>
+    </section>
+
+    <section class="grid three feature-row">
+      <article class="card"><h2>What it remembers</h2><p>Decisions, errors, commands, TODOs, CI failures, source citations, and AI context. Not secrets by default.</p><pre><code>memory what
+memory where</code></pre></article>
+      <article class="card"><h2>What it produces</h2><p>Daily recaps, resume notes, project maps, onboarding docs, release notes, and context packs for coding assistants.</p><pre><code>memory dev next
+memory dev onboard</code></pre></article>
+      <article class="card"><h2>What stays safe</h2><p>SQLite stays local. MCP is read-only by default. Terminal memory is opt-in. Risky writes remain approval-gated.</p><pre><code>memory privacy status
+memory doctor</code></pre></article>
+    </section>
+
+    <section class="split">
+      <div class="window"><div class="window-bar"><span></span><span></span><span></span><strong>daily workflow</strong></div><div class="window-body"><h2>Daily developer workflow</h2><p>Ask what happened, where you left off, and what to do next.</p><pre><code>memory dev morning
+memory dev resume "embedding registry"
+memory dev health
+memory dev next</code></pre><p class="output">Output shape: recent work, branch state, candidates, errors/fixes, exact next command.</p></div></div>
+      <div class="window"><div class="window-bar"><span></span><span></span><span></span><strong>assistant context</strong></div><div class="window-body"><h2>AI context packs</h2><p>Give Cursor, Codex, Claude, or a local model the right repo context without pasting the whole project.</p><pre><code>memory dev context --for cursor
+memory dev context --for codex --budget 2000
+memory attach cursor</code></pre><p class="output">Includes summary, important files, commands, pitfalls, TODOs, and citations.</p></div></div>
+    </section>
+
+    <section class="grid two">
+      <article class="card pastel"><h2>Project evolution maps</h2><pre><code>memory map --type evolution --output html --save .memory.cpp/demo/evolution.html
+memory map why "SQLite storage"
+memory map impact "terminal memory"</code></pre><p>Maps show timeline, decisions, bugs/fixes, files, citations, and why/impact panels.</p></article>
+      <article class="card pastel"><h2>Git, terminal, and CI memory</h2><pre><code>memory git watch --once --dry-run
+memory terminal enable
+memory ci ingest ./ci.log
+memory ci explain-failure</code></pre><p>Small practical memory, not a platform. Everything works locally and degrades gracefully.</p></article>
+    </section>
+
+    <section class="window docs-window"><div class="window-bar"><span></span><span></span><span></span><strong>docs</strong></div><div class="window-body"><h2>Documentation that starts simple</h2><p>Every guide uses: what happens, why, command, output, and what just happened.</p><div class="doc-nav"><a href="pages/quickstart.html">Quickstart</a>
+        <a href="pages/docs.html">Docs Home</a>
+        <a href="pages/cli.html">CLI Reference</a>
+        <a href="pages/dev-workflows.html">Dev Workflows</a>
+        <a href="pages/ai-assistant-integration.html">AI Assistant Integration</a>
+        <a href="pages/memory-map.html">Memory Maps</a>
+        <a href="pages/git-memory.html">Git Memory</a>
+        <a href="pages/terminal-memory.html">Terminal Memory</a>
+        <a href="pages/ci-memory.html">CI Memory</a>
+        <a href="pages/safety-privacy.html">Safety and Privacy</a>
+        <a href="pages/architecture.html">Architecture</a>
+        <a href="pages/examples.html">Examples</a>
+        <a href="pages/faq.html">FAQ</a>
+        <a href="pages/roadmap.html">Roadmap</a>
+        <a href="pages/changelog.html">Changelog</a>
+        <a href="pages/integrations.html">Integrations</a>
+        <a href="pages/install.html">Install</a>
+        <a href="pages/troubleshooting.html">Troubleshooting</a>
+        <a href="pages/contributing.html">Contributing</a>
+        <a href="pages/security-policy.html">Security Policy</a>
+        <a href="pages/recipes.html">Recipes</a></div></div></section>
+  </main>
+  <footer>memory.cpp - local repo memory for developers and AI coding tools</footer>
+  <script src="app.js"></script>
+</body>
+</html>

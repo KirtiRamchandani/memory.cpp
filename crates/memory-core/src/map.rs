@@ -1446,6 +1446,19 @@ fn render_html(map: &MemoryMap) -> String {
     h1 {{ margin: 0 0 8px; font-size: clamp(2rem, 4vw, 3.6rem); }}
     .muted {{ color: var(--muted); }}
     .hero {{ display: grid; gap: 12px; padding-bottom: 20px; }}
+    .statbar {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }}
+    .stat {{
+      padding: 14px;
+      background: rgba(255,255,255,0.72);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+    }}
+    .stat strong {{ display: block; font-size: 1.55rem; }}
     .filters {{
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1520,6 +1533,12 @@ fn render_html(map: &MemoryMap) -> String {
       <h1>{title}</h1>
       <p class="muted">Static local-first map export from memory.cpp. Search nodes, filter by class, and follow citations back to the source of truth.</p>
     </section>
+    <section class="statbar">
+      <div class="stat"><strong id="nodeCount">0</strong><span class="muted">nodes</span></div>
+      <div class="stat"><strong id="decisionCount">0</strong><span class="muted">decisions</span></div>
+      <div class="stat"><strong id="bugCount">0</strong><span class="muted">bugs/fixes</span></div>
+      <div class="stat"><strong id="citationCount">0</strong><span class="muted">citations</span></div>
+    </section>
     <section class="filters">
       <label><span class="muted">Search</span><input id="search" placeholder="Find node, file, bug, decision..." /></label>
       <label><span class="muted">Class</span><select id="classFilter"><option value="">All classes</option></select></label>
@@ -1534,6 +1553,10 @@ fn render_html(map: &MemoryMap) -> String {
       <section class="panel">
         <h2>Map Notes</h2>
         <ul id="notes" class="notes-list"></ul>
+        <details open>
+          <summary>Project timeline</summary>
+          <ul id="timeline" class="notes-list"></ul>
+        </details>
         <details open>
           <summary>Edges</summary>
           <ul id="edges" class="edge-list"></ul>
@@ -1551,15 +1574,28 @@ fn render_html(map: &MemoryMap) -> String {
     const edges = document.getElementById('edges');
     const citations = document.getElementById('citations');
     const notes = document.getElementById('notes');
+    const timeline = document.getElementById('timeline');
     const search = document.getElementById('search');
     const classFilter = document.getElementById('classFilter');
     const fromFilter = document.getElementById('fromFilter');
     const toFilter = document.getElementById('toFilter');
 
+    document.getElementById('nodeCount').textContent = (map.nodes || []).length;
+    document.getElementById('decisionCount').textContent = (map.nodes || []).filter(node => node.class === 'decision').length;
+    document.getElementById('bugCount').textContent = (map.nodes || []).filter(node => node.class === 'bug' || node.class === 'fix').length;
+    document.getElementById('citationCount').textContent = (map.citations || []).length;
+
     for (const note of map.notes || []) {{
       const item = document.createElement('li');
       item.textContent = note;
       notes.appendChild(item);
+    }}
+
+    for (const node of [...(map.nodes || [])].filter(node => node.created_at || node.updated_at).sort((a, b) => String(a.created_at || a.updated_at).localeCompare(String(b.created_at || b.updated_at))).slice(0, 18)) {{
+      const item = document.createElement('li');
+      const stamp = String(node.created_at || node.updated_at).slice(0, 10);
+      item.innerHTML = `<span class="mono">${{stamp}}</span> ${{node.label}} <span class="muted">(${{node.class}})</span>`;
+      timeline.appendChild(item);
     }}
 
     const classes = [...new Set((map.nodes || []).map(node => node.class))].sort();
@@ -1602,7 +1638,7 @@ fn render_html(map: &MemoryMap) -> String {
         }}).join('');
         card.innerHTML = `
           <h3>${{node.label}}</h3>
-          <div class="muted">${{node.class}}${{when ? ' · ' + when : ''}}</div>
+          <div class="muted">${{node.class}}${{when ? ' - ' + when : ''}}</div>
           <div class="badges">${{badges}}</div>
           <p>${{node.detail || ''}}</p>
           <details>
@@ -1615,7 +1651,7 @@ fn render_html(map: &MemoryMap) -> String {
 
       for (const edge of (map.edges || []).filter(edge => visibleIds.has(edge.source) || visibleIds.has(edge.target))) {{
         const item = document.createElement('li');
-        item.innerHTML = `<span class="mono">${{edge.source}}</span> → <span class="mono">${{edge.target}}</span> <span class="muted">(${{edge.kind}})</span>`;
+        item.innerHTML = `<span class="mono">${{edge.source}}</span> -> <span class="mono">${{edge.target}}</span> <span class="muted">(${{edge.kind}})</span>`;
         edges.appendChild(item);
       }}
 

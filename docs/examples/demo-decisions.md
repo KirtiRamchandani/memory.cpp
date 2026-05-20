@@ -199,7 +199,7 @@
 - ADR 0001: SQLite As The Core Store (.\docs\adr\0001-sqlite-local-first.md)
 - ADR 0002: MCP Read-Only By Default (.\docs\adr\0002-mcp-read-only-default.md)
 - ADR 0003: Map As A First-Class Product Surface (.\docs\adr\0003-map-as-product-surface.md)
-- Architecture (.\docs\ARCHITECTURE.md)
+- Architecture (./docs/architecture.md)
 - Attach helpers should default to read-only MCP with workspace scoping and credential redaction so the first integration feels trustworthy. (crates/memory-cli/src/main.rs)
 - C API (.\docs\C_API.md)
 - CLI Reference (.\docs\cli.md)

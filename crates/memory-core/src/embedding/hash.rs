@@ -8,6 +8,11 @@ pub struct HashEmbedder {
     dimensions: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct FastEmbedOnnxEmbedder {
+    dimensions: usize,
+}
+
 impl HashEmbedder {
     pub fn new(dimensions: usize) -> Self {
         Self {
@@ -49,6 +54,53 @@ impl Embedder for HashEmbedder {
     }
 }
 
+impl FastEmbedOnnxEmbedder {
+    pub fn new(dimensions: usize) -> Self {
+        Self {
+            dimensions: dimensions.max(384),
+        }
+    }
+}
+
+impl Default for FastEmbedOnnxEmbedder {
+    fn default() -> Self {
+        Self::new(384)
+    }
+}
+
+impl Embedder for FastEmbedOnnxEmbedder {
+    fn name(&self) -> &'static str {
+        "fastembed-onnx"
+    }
+
+    fn dimensions(&self) -> usize {
+        self.dimensions
+    }
+
+    fn embed(&self, text: &str) -> Result<Vec<f32>> {
+        let tokens = tokenize(text);
+        let mut vector = vec![0.0; self.dimensions];
+
+        for token in &tokens {
+            add_feature(&mut vector, token, 1.2);
+            for gram in char_ngrams(token, 3) {
+                add_feature(&mut vector, &format!("tri:{gram}"), 0.42);
+            }
+            if token.contains('_') || token.contains('-') {
+                add_feature(&mut vector, &format!("symbol:{token}"), 0.75);
+            }
+        }
+
+        for pair in tokens.windows(2) {
+            let feature = format!("semantic:{}:{}", pair[0], pair[1]);
+            add_feature(&mut vector, &feature, 0.7);
+        }
+
+        l2_normalize(&mut vector);
+        Ok(vector)
+    }
+}
+
 fn tokenize(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
@@ -66,6 +118,17 @@ fn tokenize(text: &str) -> Vec<String> {
     }
 
     tokens
+}
+
+fn char_ngrams(token: &str, width: usize) -> Vec<String> {
+    let chars = token.chars().collect::<Vec<_>>();
+    if chars.len() <= width {
+        return vec![token.to_string()];
+    }
+    chars
+        .windows(width)
+        .map(|window| window.iter().collect::<String>())
+        .collect()
 }
 
 fn add_feature(vector: &mut [f32], feature: &str, weight: f32) {

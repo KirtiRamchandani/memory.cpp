@@ -14,7 +14,7 @@ mod vector;
 
 pub use compression::{CompressionConfig, Compressor, HeuristicCompressor};
 pub use config::EngineConfig;
-pub use embedding::{Embedder, HashEmbedder, SharedEmbedder};
+pub use embedding::{Embedder, FastEmbedOnnxEmbedder, HashEmbedder, SharedEmbedder};
 pub use engine::MemoryEngine;
 pub use error::{MemoryError, Result};
 pub use eval::{evaluate, EvalCase, EvalReport, EvalResult};

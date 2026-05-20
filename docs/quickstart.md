@@ -1,6 +1,8 @@
 # Quickstart
 
-This guide takes you from an empty local database to a shareable project map in a few minutes.
+`memory.cpp` helps your repo remember what happened, why it changed, and what to do next.
+
+This page gets you from a fresh checkout to a local project map and daily recap in five minutes.
 
 ## 1. Install
 
@@ -16,187 +18,133 @@ On Windows PowerShell:
 ./scripts/install.ps1
 ```
 
-If you prefer not to install globally yet, replace `memory` with `cargo run -p memory-cli --` in every command below.
+If you do not want to install globally yet, replace `memory` with `cargo run -p memory-cli --` in every command below.
 
-## 2. Initialize a workspace
+## 2. Let memory.cpp introduce itself
 
 ```bash
-memory --db .memory.cpp/memory.db init --workspace demo
+memory welcome
+memory setup --developer
 ```
 
-This creates the local SQLite-backed memory file and sets `demo` as the default workspace.
+What happens:
 
-Optional but recommended before watching or importing a real repo:
+- `.memory.cpp/` is created in this repo.
+- `.memory.cpp/memory.db` becomes the local SQLite memory file.
+- `.memoryignore` is created if it does not exist.
+- A workspace is created for the repo.
+- The setup prints detected tools such as Git, README, docs, CI config, package manager, Cursor, Claude, VS Code, and Ollama.
+
+For a guided prompt-by-prompt flow:
+
+```bash
+memory setup --interactive
+```
+
+For a private/offline setup:
+
+```bash
+memory setup --private --offline
+```
+
+## 3. Check where data lives
+
+```bash
+memory what
+memory where
+memory privacy status
+```
+
+Expected shape:
 
 ```text
-.memoryignore
+What memory.cpp does
+memory.cpp helps your repo remember what happened, why it changed, and what to do next.
+
+Where memory.cpp keeps data
+Database: .memory.cpp/memory.db
+Config:   .memory.cpp/memory-config.json
 ```
 
-Example:
+Nothing is uploaded to a cloud service by these commands.
 
-```text
-.env
-*.pem
-*.key
-secrets/
-node_modules/
-target/
-```
-
-Or initialize it automatically:
+## 4. Seed the demo
 
 ```bash
-memory ignore init
-```
-
-## 3. Seed the launch demo
-
-```bash
-memory --db .memory.cpp/memory.db demo seed --workspace demo --path .
+memory demo seed --workspace demo --path .
+memory show-map --workspace demo --save .memory.cpp/demo/evolution.html
 ```
 
 What this does:
 
-- creates or activates the `demo` workspace
-- stores a realistic set of decisions, bugs, fixes, workflow notes, and launch tasks
-- queues a candidate memory for review
-- writes shareable map artifacts under `.memory.cpp/demo/`
+- stores sample decisions, bugs, fixes, workflow notes, and launch tasks
+- queues a sample candidate for review
+- generates a self-contained HTML project evolution map
 
-Expected outputs:
-
-- `.memory.cpp/demo/evolution.html`
-- `.memory.cpp/demo/evolution.mmd`
-- `.memory.cpp/demo/decisions.md`
-- `.memory.cpp/demo/architecture.mmd`
-
-## 4. Generate a project evolution map
+## 5. Try the daily developer loop
 
 ```bash
-memory --db .memory.cpp/memory.db map . --workspace demo --type evolution --output html --save .memory.cpp/demo/evolution.html
+memory dev morning --workspace demo
+memory dev resume "MCP integration" --workspace demo
+memory dev explain-repo . --workspace demo
+memory next --workspace demo
 ```
 
-Open the generated HTML file in a browser. The export is self-contained and includes:
+These commands answer:
 
-- search
-- class filter
-- date filters
-- citations
-- notes
-- edges
+- What was I doing?
+- What changed recently?
+- What broke?
+- What did I plan to do next?
+- What should I work on now?
 
-## 5. Try the daily workflow surface
+## 6. Review candidates
 
 ```bash
-memory --db .memory.cpp/memory.db dev morning --workspace demo
-memory --db .memory.cpp/memory.db dev resume "MCP integration" --workspace demo
-memory --db .memory.cpp/memory.db dev explain-repo . --workspace demo
-memory --db .memory.cpp/memory.db dev next --workspace demo
+memory show-inbox --workspace demo
+memory inbox stats --workspace demo
+memory inbox explain <candidate-id>
 ```
 
-`dev morning` is the best quick proof that the repo can explain itself.
+A candidate is a suggested memory that needs human approval before becoming durable memory.
 
-## 5.5. Pull signal from the repo itself
+## 7. Create AI assistant context
 
 ```bash
-memory --db .memory.cpp/memory.db git summary --since 14d
-memory --db .memory.cpp/memory.db git ingest --workspace demo --since 14d
-memory --db .memory.cpp/memory.db extract . --workspace demo --dry-run --limit 8
-memory --db .memory.cpp/memory.db import . --workspace demo --preview-redactions
+memory show-context --workspace demo
+memory dev context --for cursor --workspace demo
+memory dev context --for codex --workspace demo
+memory dev context --for claude --workspace demo
 ```
 
-This gives you three useful layers:
+The output is a clean context block with repo summary, recent decisions, important files, commands to run, known pitfalls, and source citations.
 
-- `git summary`: what changed recently
-- `git ingest`: what should probably become memory
-- `extract --dry-run`: what docs/comments would turn into candidate memory
-
-## 6. Attach a coding agent
+## 8. Diagnose setup
 
 ```bash
-memory --db .memory.cpp/memory.db attach cursor --workspace demo
+memory doctor --workspace demo
 ```
 
-This writes a local MCP config that points Cursor at `memory.cpp` in read-only mode by default.
+`doctor` checks database health, schema readability, workspace status, MCP safety defaults, Cursor/Claude/Ollama signals, proxy port availability, Git status, map export support, runtime state, and smoke-test hints.
 
-Other supported targets:
+## 9. Delete everything if you want a clean slate
 
 ```bash
-memory --db .memory.cpp/memory.db attach codex --workspace demo
-memory --db .memory.cpp/memory.db attach claude --workspace demo
-memory --db .memory.cpp/memory.db attach vscode --workspace demo
+memory privacy purge --yes
 ```
 
-## 7. Start the local dashboard/runtime
+Or remove the local folder yourself:
 
 ```bash
-memory --db .memory.cpp/memory.db start --workspace demo
-memory --db .memory.cpp/memory.db status
+rm -rf .memory.cpp
 ```
 
-This starts the local dashboard/API in the background and writes runtime state under `.memory.cpp/runtime/`.
-
-Stop it when you are done:
-
-```bash
-memory --db .memory.cpp/memory.db stop
-```
-
-## 8. Validate the setup
-
-```bash
-memory --db .memory.cpp/memory.db doctor --workspace demo
-```
-
-`doctor` checks:
-
-- database availability
-- schema readability
-- active workspace
-- git detection
-- MCP safety defaults
-- Ollama reachability
-- export directory writability
-- runtime state
-- API port availability
-
-## 8.5. Inspect agent access receipts
-
-```bash
-memory --db .memory.cpp/memory.db audit-log --limit 10
-```
-
-This reads the local MCP access log so you can verify which tools were used and whether any operation was blocked.
-
-## 9. Try the proxy demo
-
-If Ollama is running locally:
-
-```bash
-memory --db .memory.cpp/memory.db attach ollama --workspace demo --start-proxy
-```
-
-Or run the proxy directly:
-
-```bash
-memory --db .memory.cpp/memory.db proxy --listen 127.0.0.1:7332 --upstream http://127.0.0.1:11434 --workspace demo --learn --approval-required
-```
-
-Then point any OpenAI-compatible client at:
-
-```text
-http://127.0.0.1:7332/v1
-```
-
-## 10. Run the smoke test
-
-```bash
-./scripts/smoke.sh
-```
-
-On Windows PowerShell:
+PowerShell:
 
 ```powershell
-./scripts/smoke.ps1
+Remove-Item -Recurse -Force .memory.cpp
 ```
 
-The smoke script covers init, demo seed, git summary, extraction dry-run, map export, doctor, runtime start/stop, MCP tool listing, and audit-log visibility.
+## What just happened?
+
+You created a local memory store, reviewed where it lives, generated a project map, asked for a daily recap, and produced AI assistant context. The repo now has a small local memory layer without requiring a hosted service.

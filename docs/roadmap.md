@@ -1,70 +1,95 @@
 # Roadmap
 
-`memory.cpp` is not done yet. The current goal is a polished, credible launchable core.
+`memory.cpp` is not done yet. The current goal is a polished, credible developer tool that people can install, understand, and use daily.
 
-## v0.2.1: Make developers care
+The product promise stays narrow:
 
-Focus:
+> Your repo remembers.
 
-- local SQLite memory
-- repo memory
-- visual map
-- AI integration surface
-- safe MCP defaults
-- zero-to-demo quickstart
-
-Core milestones:
-
-- README quickstart
-- `memory demo seed`
-- `memory map --type evolution --output html --save ...`
-- `memory map why`
-- `memory map impact`
-- `memory dev morning`
-- `memory dev resume`
-- `memory doctor`
-- install scripts
-- smoke tests
-- CI and binary release workflow
-
-## v0.3: Make the memory feel automatic
+## Current public developer adoption release
 
 Focus:
 
-- candidate inbox polish
-- Git-aware extraction
-- passive proxy learning
-- embedding provider registry
-- local semantic embeddings beyond hash mode
+- one-command setup and install clarity
+- daily developer commands
+- AI context packs
+- Git, terminal, and CI memory basics
+- candidate inbox trust
+- project maps and timelines
+- shareable PR, handoff, release, and onboarding artifacts
+- local-first privacy and redaction
+- release hardening, compatibility docs, and security policy
 
-## v0.4: Make teams and security people care
+## v0.x: Hardening before expansion
 
-Focus:
+Before adding major surfaces, improve:
 
-- CI log memory
-- flaky test memory
-- PR summaries
-- audit-mode memory
-- defensive reporting
-- richer dashboard views
+- fresh-clone release-candidate validation
+- built-binary smoke tests
+- cross-platform install verification
+- map/context output snapshots
+- redaction fixtures
+- corrupt database recovery tests
+- Windows path tests
+- benchmark reporting
+- C API stability notes
+- release archive verification
 
-## v0.5+: Domain packs
+## Daily developer habit backlog
 
-Examples:
+- better `memory dev morning` source citations
+- better `memory dev resume <topic>` relevance
+- richer terminal command recall after opt-in
+- better CI failure grouping
+- more useful `memory dev readme-suggest`
+- more practical `memory pr checklist`
+- clearer stale decision detection
+- more map compare/export options
 
-- webapp testing pack
-- mobile testing pack
-- fuzzing pack
-- audit pack
-- plugin SDK
-- SDKs and ecosystem surface
+## Trust and safety backlog
 
-## v1.0
+- stronger `.memoryignore` diagnostics
+- more redaction fixtures
+- private-safe artifact audit output
+- MCP write-policy receipts
+- backup/restore polish
+- optional encrypted local store research
+- clearer integration config repair flow
 
-This is where the durable platform story becomes real:
+## Packaging backlog
 
-- encrypted local stores
-- sync
-- team memory
-- deeper permissions and governance
-- stable SDK ecosystem
+- release artifact install verification
+- macOS Apple Silicon artifact naming
+- Linux ARM/Raspberry Pi notes
+- Homebrew formula exploration
+- Windows PATH troubleshooting improvements
+- signed release policy research
+
+## Deferred on purpose
+
+Do not rush these before the developer core is loved:
+
+- hosted SaaS
+- enterprise team sync
+- billing
+- plugin marketplace
+- mobile packs
+- webapp/AppSec packs
+- fuzzing packs
+- heavyweight browser extension
+- Electron desktop app
+- complex permission systems
+- distributed memory server
+
+## v1.0 bar
+
+A v1.0 candidate should have:
+
+- stable core CLI and storage compatibility promises
+- documented C API stability
+- release-candidate script passing from a fresh clone
+- Linux, macOS, and Windows CI passing
+- install docs tested on all supported platforms
+- security policy and known limitations kept current
+- examples that run or are clearly marked static
+- no false maturity claims for beta/experimental surfaces

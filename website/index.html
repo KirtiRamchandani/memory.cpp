@@ -21,6 +21,7 @@
       <a href="#share">Share</a>
       <a href="#docs">Docs</a>
       <a href="#trust">Trust</a>
+      <a href="#release">Release</a>
       <button id="themeToggle" type="button">Dark mode</button>
     </nav>
   </header>
@@ -132,7 +133,7 @@ memory ci explain-failure</code></pre><p>Small practical memory for everyday dev
     </section>
     <section class="window docs-window"><div class="window-bar"><span></span><span></span><span></span><strong>manual</strong></div><div class="window-body">
       <div class="doc-nav">
-        <a href="pages/quickstart.html">Quickstart</a><a href="pages/install.html">Install</a><a href="pages/tour.html">5-minute tour</a><a href="pages/docs.html">Docs home</a><a href="pages/cli.html">CLI reference</a><a href="pages/dev-workflows.html">Dev workflows</a><a href="pages/integrations.html">Integrations</a><a href="pages/recipes.html">Recipes</a><a href="pages/examples.html">Examples</a><a href="pages/safety-privacy.html">Safety and privacy</a><a href="pages/architecture.html">Architecture</a><a href="pages/roadmap.html">Roadmap</a><a href="pages/changelog.html">Changelog</a><a href="pages/faq.html">FAQ</a><a href="pages/troubleshooting.html">Troubleshooting</a><a href="pages/contributing.html">Contributing</a><a href="pages/security-policy.html">Security policy</a><a href="../docs/share.md">Share docs</a><a href="../docs/pr-workflow.md">PR docs</a><a href="../docs/timeline.md">Timeline docs</a><a href="../docs/handoff.md">Handoff docs</a><a href="../docs/adoption.md">Adoption docs</a><a href="../docs/launch-checklist.md">Launch checklist</a><a href="../launch/demo-script.md">Demo script</a></div>
+        <a href="pages/quickstart.html">Quickstart</a><a href="pages/install.html">Install</a><a href="pages/tour.html">5-minute tour</a><a href="pages/docs.html">Docs home</a><a href="pages/cli.html">CLI reference</a><a href="pages/dev-workflows.html">Dev workflows</a><a href="pages/integrations.html">Integrations</a><a href="pages/recipes.html">Recipes</a><a href="pages/examples.html">Examples</a><a href="pages/safety-privacy.html">Safety and privacy</a><a href="pages/architecture.html">Architecture</a><a href="pages/roadmap.html">Roadmap</a><a href="pages/changelog.html">Changelog</a><a href="pages/faq.html">FAQ</a><a href="pages/troubleshooting.html">Troubleshooting</a><a href="pages/contributing.html">Contributing</a><a href="pages/security-policy.html">Security policy</a><a href="../docs/share.md">Share docs</a><a href="../docs/pr-workflow.md">PR docs</a><a href="../docs/timeline.md">Timeline docs</a><a href="../docs/handoff.md">Handoff docs</a><a href="../docs/adoption.md">Adoption docs</a><a href="../docs/release-hardening.md">Release hardening</a><a href="../docs/api-stability.md">API stability</a><a href="../docs/compatibility.md">Compatibility</a><a href="../docs/limitations.md">Limitations</a><a href="../docs/performance.md">Performance</a><a href="../docs/security.md">Security notes</a><a href="../docs/dogfooding.md">Dogfooding</a><a href="../docs/release-process.md">Release process</a><a href="../docs/community.md">Community</a><a href="../docs/launch-checklist.md">Launch checklist</a><a href="../launch/demo-script.md">Demo script</a></div>
     </div></section>
 
     <section class="section-head" id="trust">
@@ -152,6 +153,20 @@ memory fix
 memory release-check</code></pre></article>
     </section>
 
+
+    <section class="section-head" id="release">
+      <p class="eyebrow">Release confidence</p>
+      <h2>Clear maturity labels, compatibility notes, and hardening gates.</h2>
+      <p>The public surface is documented honestly so developers know what is stable, beta, experimental, and intentionally deferred.</p>
+    </section>
+    <section class="grid three">
+      <article class="card"><h3>Release candidate</h3><p>Run one bounded script before tagging.</p><pre><code>./scripts/release-candidate.sh
+./scripts/release-candidate.ps1</code></pre><div class="link-row"><a href="../docs/release-hardening.md">Hardening guide</a><a href="../docs/release-process.md">Release process</a></div></article>
+      <article class="card"><h3>Compatibility</h3><p>Rust, OS, editor, MCP, terminal, CI, and low-RAM support are explicit.</p><pre><code>memory release-check
+memory doctor</code></pre><div class="link-row"><a href="../docs/compatibility.md">Compatibility</a><a href="../docs/api-stability.md">API stability</a></div></article>
+      <article class="card"><h3>Known limits</h3><p>No hosted sync, no cloud account, no plugin marketplace, and no fake ONNX claims.</p><pre><code>memory privacy status
+memory embeddings explain</code></pre><div class="link-row"><a href="../docs/limitations.md">Limitations</a><a href="../docs/performance.md">Performance</a></div></article>
+    </section>
     <section class="window final-cta"><div class="window-bar"><span></span><span></span><span></span><strong>try-it</strong></div><div class="window-body"><h2>Install, remember, explain, share.</h2><p>Start with dry-run install, then build the first local context pack and project summary.</p><pre><code>./scripts/install.sh --dry-run
 memory setup --developer --yes
 memory dev morning

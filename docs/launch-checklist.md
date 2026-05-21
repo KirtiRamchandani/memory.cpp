@@ -13,7 +13,12 @@ Use this before a public release.
 - Smoke scripts pass on PowerShell and Bash.
 - Privacy docs explain purge, redaction, and local-first behavior.
 - Known beta limitations are documented.
+- `SECURITY.md` is present and linked from README.
+- `docs/api-stability.md` labels stable, beta, experimental, and internal surfaces.
+- `docs/compatibility.md` says which platforms and integrations are supported.
+- `docs/release-hardening.md` explains fresh clone and built-binary verification.
 - Release workflow emits checksums.
+
 ## Virality and adoption loop
 
 - [ ] `memory share status` generates a private-safe summary
@@ -22,3 +27,5 @@ Use this before a public release.
 - [ ] `memory handoff new-dev` creates a sanitized local bundle
 - [ ] `memory adoption checklist` gives the next activation step
 - [ ] `memory release-check` passes before tagging
+- [ ] `./scripts/release-candidate.sh` or `./scripts/release-candidate.ps1` passes
+- [ ] README hot topics, quick start, docs links, limitations, and maturity labels are current

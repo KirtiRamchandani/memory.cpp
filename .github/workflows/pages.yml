@@ -32,7 +32,7 @@ jobs:
         run: |
           echo "GitHub Pages is not available for this repository plan."
           echo "Skipping deployment; enable Pages support in repository settings to publish the static site."
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         if: steps.configure_pages.outcome == 'success'
         with:
           path: website

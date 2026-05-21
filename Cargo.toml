@@ -10,10 +10,10 @@ resolver = "2"
 edition = "2021"
 license = "MIT"
 authors = ["memory.cpp contributors"]
-repository = "https://github.com/memorycpp/memory.cpp"
-homepage = "https://github.com/memorycpp/memory.cpp"
-description = "A tiny, local-first long-term memory engine for AI applications."
-keywords = ["ai", "memory", "sqlite", "embeddings", "retrieval"]
+repository = "https://github.com/KirtiRamchandani/memory.cpp"
+homepage = "https://github.com/KirtiRamchandani/memory.cpp"
+description = "Local-first repo memory for developers and AI coding tools."
+keywords = ["ai", "memory", "sqlite", "cli", "local-first"]
 categories = ["database", "command-line-utilities", "api-bindings"]
 
 [workspace.dependencies]

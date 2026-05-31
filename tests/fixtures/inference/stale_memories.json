@@ -1,0 +1,5 @@
+[
+  {"id":"mem-active","status":"active","text":"Use SQLite for local-first memory."},
+  {"id":"mem-stale","status":"stale","text":"Use the old JSON file store."},
+  {"id":"mem-super","status":"superseded","text":"Old setup command was memory init-only."}
+]

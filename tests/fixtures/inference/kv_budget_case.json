@@ -1,0 +1,7 @@
+{
+  "task":"debug checkout bug",
+  "max_kv_tokens":4096,
+  "raw_context_tokens":12000,
+  "expected_compiled_under":4096,
+  "must_exclude":["stale","superseded","raw tool log"]
+}

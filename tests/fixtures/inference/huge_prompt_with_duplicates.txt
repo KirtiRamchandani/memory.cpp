@@ -1,0 +1,10 @@
+Project rule: Use cargo for Rust tasks.
+Project rule: Use cargo for Rust tasks.
+Project rule: Use cargo for Rust tasks.
+Stable prefix:
+- Use SQLite for local memory.
+- Use SQLite for local memory.
+Fresh suffix:
+Fix checkout bug.
+Tool output: huge repeated build log line.
+Tool output: huge repeated build log line.

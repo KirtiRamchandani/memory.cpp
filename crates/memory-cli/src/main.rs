@@ -2,7 +2,8 @@ use std::{
     collections::{HashMap, HashSet},
     env, fs,
     fs::{File, OpenOptions},
-    io::{self, BufRead, Write},
+    hash::{Hash, Hasher},
+    io::{self, BufRead, Read, Write},
     net::TcpListener,
     path::{Path, PathBuf},
     process::{Command as ProcessCommand, Stdio},
@@ -1216,9 +1217,9 @@ struct ManualImportCli {
 struct ManualRememberCli {
     #[arg(required = true, num_args = 1..)]
     content: Vec<String>,
-    #[arg(long, default_value = "note", value_parser = parse_kind)]
+    #[arg(long, alias = "type", default_value = "note", value_parser = parse_kind)]
     kind: MemoryKind,
-    #[arg(long)]
+    #[arg(long, alias = "scope")]
     workspace: Option<String>,
     #[arg(long, value_delimiter = ',')]
     tags: Vec<String>,
@@ -1254,7 +1255,7 @@ struct ManualRememberCli {
 struct ManualRecallCli {
     #[arg(required = true, num_args = 1..)]
     query: Vec<String>,
-    #[arg(long)]
+    #[arg(long, alias = "scope")]
     workspace: Option<String>,
     #[arg(long = "kind", value_parser = parse_kind)]
     kinds: Vec<MemoryKind>,
@@ -2832,6 +2833,248 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
                 args.json,
             )?;
         }
+        "compile" => {
+            let engine = build_engine_from_options(&options)?;
+            ai_compile_command(&engine, &rest)?;
+        }
+        "pack" => {
+            let engine = build_engine_from_options(&options)?;
+            ai_pack_command(&engine, &rest)?;
+        }
+        "token-firewall" => {
+            let engine = build_engine_from_options(&options)?;
+            token_firewall_command(&engine, &rest)?;
+        }
+        "firewall" => {
+            let engine = build_engine_from_options(&options)?;
+            firewall_command(&engine, &rest)?;
+        }
+        "cache-plan" => {
+            let engine = build_engine_from_options(&options)?;
+            cache_plan_command(&engine, &rest)?;
+        }
+        "kv-report" => {
+            let engine = build_engine_from_options(&options)?;
+            kv_report_command(&engine, &rest)?;
+        }
+        "prefill-report" => {
+            let engine = build_engine_from_options(&options)?;
+            prefill_report_command(&engine, &rest)?;
+        }
+        "kv-budget" => {
+            let engine = build_engine_from_options(&options)?;
+            kv_budget_command(&engine, &rest)?;
+        }
+        "signal-density" => {
+            let engine = build_engine_from_options(&options)?;
+            signal_density_command(&engine, &rest)?;
+        }
+        "batch-plan" => {
+            let engine = build_engine_from_options(&options)?;
+            batch_plan_command(&engine, &rest)?;
+        }
+        "runtime-profile" => {
+            runtime_profile_command(&rest)?;
+        }
+        "cache-audit" => {
+            let engine = build_engine_from_options(&options)?;
+            cache_audit_command(&engine, &rest)?;
+        }
+        "kv-compile" => {
+            let engine = build_engine_from_options(&options)?;
+            ai_compile_command(&engine, &rest)?;
+            kv_report_command(&engine, &rest)?;
+        }
+        "trace" => {
+            let engine = build_engine_from_options(&options)?;
+            trace_command(&engine, &rest)?;
+        }
+        "trace-rollup" => {
+            trace_rollup_command(&rest)?;
+        }
+        "mistake" => {
+            let engine = build_engine_from_options(&options)?;
+            mistake_command(&engine, &rest)?;
+        }
+        "mistakes" => {
+            let engine = build_engine_from_options(&options)?;
+            mistakes_command(&engine, &rest)?;
+        }
+        "conflicts" => {
+            let engine = build_engine_from_options(&options)?;
+            conflicts_command(&engine, &rest)?;
+        }
+        "stale" => {
+            let engine = build_engine_from_options(&options)?;
+            stale_command(&engine, &rest)?;
+        }
+        "resolve" => {
+            let engine = build_engine_from_options(&options)?;
+            resolve_memory_command(&engine, &rest)?;
+        }
+        "savings" => {
+            let engine = build_engine_from_options(&options)?;
+            savings_command(&engine, &rest)?;
+        }
+        "runtime-plan" => {
+            let engine = build_engine_from_options(&options)?;
+            runtime_plan_command(&engine, &rest)?;
+        }
+        "bench-context" => {
+            let engine = build_engine_from_options(&options)?;
+            bench_context_command(&engine, &rest)?;
+        }
+        "bench" => {
+            let engine = build_engine_from_options(&options)?;
+            bench_context_command(&engine, &rest)?;
+        }
+        "explain-compile" => {
+            let engine = build_engine_from_options(&options)?;
+            explain_compile_command(&engine, &rest)?;
+        }
+        "roi" => {
+            let engine = build_engine_from_options(&options)?;
+            roi_command(&engine, &rest)?;
+        }
+        "leaderboard" => {
+            let engine = build_engine_from_options(&options)?;
+            leaderboard_command(&engine, &rest)?;
+        }
+        "cache-hash" => {
+            let engine = build_engine_from_options(&options)?;
+            cache_hash_command(&engine, &rest)?;
+        }
+        "cache-stability" => {
+            let engine = build_engine_from_options(&options)?;
+            cache_stability_command(&engine, &rest)?;
+        }
+        "memories" => {
+            let engine = build_engine_from_options(&options)?;
+            memories_command(&engine, &rest)?;
+        }
+        "update-memory" => {
+            let args = ManualEditCli::parse_from(
+                std::iter::once("edit".to_string()).chain(rest.iter().cloned()),
+            );
+            let engine = build_engine_from_options(&options)?;
+            edit_command(
+                &engine,
+                &args.id,
+                &args.content,
+                args.kind,
+                &args.tags,
+                &args.metadata,
+                args.importance,
+                args.confidence,
+                args.source.as_deref(),
+                args.source_type.as_deref(),
+                args.source_file.as_deref(),
+                args.source_line,
+                args.source_commit.as_deref(),
+                args.source_conversation.as_deref(),
+                args.created_by.as_deref(),
+                args.status.as_deref(),
+                args.json,
+            )?;
+        }
+        "profile" => {
+            let engine = build_engine_from_options(&options)?;
+            profile_command(&engine, &rest)?;
+        }
+        "trust-report" => {
+            let engine = build_engine_from_options(&options)?;
+            trust_report_command(&engine, &rest)?;
+        }
+        "redactions" => {
+            redactions_command(&rest)?;
+        }
+        "evidence" => {
+            let engine = build_engine_from_options(&options)?;
+            evidence_command(&engine, &rest)?;
+        }
+        "quarantine" => {
+            let engine = build_engine_from_options(&options)?;
+            quarantine_command(&engine, &rest)?;
+        }
+        "review" => {
+            let engine = build_engine_from_options(&options)?;
+            review_command(&engine, &rest)?;
+        }
+        "flight" => {
+            let engine = build_engine_from_options(&options)?;
+            flight_command(&engine, &rest)?;
+        }
+        "context-diff" => {
+            let engine = build_engine_from_options(&options)?;
+            context_diff_command(&engine, &rest)?;
+        }
+        "blame" => {
+            let engine = build_engine_from_options(&options)?;
+            blame_command(&engine, &rest)?;
+        }
+        "explain-pack" => {
+            let engine = build_engine_from_options(&options)?;
+            explain_pack_command(&engine, &rest)?;
+        }
+        "test" => {
+            let engine = build_engine_from_options(&options)?;
+            memory_test_command(&engine, &rest)?;
+        }
+        "ci-check" => {
+            let engine = build_engine_from_options(&options)?;
+            ci_check_command(&engine, &rest)?;
+        }
+        "ask" => {
+            let engine = build_engine_from_options(&options)?;
+            ask_memory_command(&engine, &rest)?;
+        }
+        "suggest" => {
+            let engine = build_engine_from_options(&options)?;
+            suggest_memory_command(&engine, &rest)?;
+        }
+        "warnings" => {
+            let engine = build_engine_from_options(&options)?;
+            warnings_command(&engine, &rest)?;
+        }
+        "proactive" => {
+            let engine = build_engine_from_options(&options)?;
+            proactive_command(&engine, &rest)?;
+        }
+        "ingest" => {
+            let engine = build_engine_from_options(&options)?;
+            ingest_command(&engine, &rest)?;
+        }
+        "shared-context" => {
+            let engine = build_engine_from_options(&options)?;
+            shared_context_command(&engine, &rest)?;
+        }
+        "heatmap" => {
+            let engine = build_engine_from_options(&options)?;
+            heatmap_command(&engine, &rest)?;
+        }
+        "report" => {
+            let engine = build_engine_from_options(&options)?;
+            static_report_command(&engine, &rest)?;
+        }
+        "dashboard" => {
+            let engine = build_engine_from_options(&options)?;
+            static_dashboard_command(&engine, &rest)?;
+        }
+        "agents-score" => {
+            let engine = build_engine_from_options(&options)?;
+            agents_score_command(&engine, &rest)?;
+        }
+        "badge" => {
+            let engine = build_engine_from_options(&options)?;
+            badge_command(&engine, &rest)?;
+        }
+        "recipe" => {
+            recipe_command(&rest)?;
+        }
+        "preflight" => {
+            let engine = build_engine_from_options(&options)?;
+            preflight_command(&engine, &rest)?;
+        }
         "recall" | "search" => {
             let args = ManualRecallCli::parse_from(
                 std::iter::once(command.clone()).chain(rest.iter().cloned()),
@@ -2972,7 +3215,11 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
         }
         "clean" => {
             let engine = build_engine_from_options(&options)?;
-            clean_command(&engine)?;
+            if rest.first().is_some_and(|value| value == "stale") {
+                clean_stale_command(&engine, &rest[1..])?;
+            } else {
+                clean_command(&engine)?;
+            }
         }
         "reset-demo" => {
             let engine = build_engine_from_options(&options)?;
@@ -3346,11 +3593,15 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
             }
         }
         "doctor" => {
-            let args = ManualDoctorCli::parse_from(
-                std::iter::once(command.clone()).chain(rest.iter().cloned()),
-            );
             let engine = build_engine_from_options(&options)?;
-            doctor_command(&engine, &options, args.workspace.as_ref(), args.json)?;
+            if has_task_like_positional(&rest) || cli_flag(&rest, "--provider") {
+                ai_doctor_command(&engine, &rest)?;
+            } else {
+                let args = ManualDoctorCli::parse_from(
+                    std::iter::once(command.clone()).chain(rest.iter().cloned()),
+                );
+                doctor_command(&engine, &options, args.workspace.as_ref(), args.json)?;
+            }
         }
         "audit-log" => {
             let args = ManualAuditLogCli::parse_from(
@@ -3425,6 +3676,62 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "import",
         "remember",
         "add",
+        "compile",
+        "pack",
+        "token-firewall",
+        "firewall",
+        "cache-plan",
+        "kv-report",
+        "prefill-report",
+        "kv-budget",
+        "signal-density",
+        "batch-plan",
+        "runtime-profile",
+        "cache-audit",
+        "kv-compile",
+        "trace",
+        "trace-rollup",
+        "mistake",
+        "mistakes",
+        "conflicts",
+        "stale",
+        "resolve",
+        "savings",
+        "runtime-plan",
+        "bench-context",
+        "bench",
+        "explain-compile",
+        "roi",
+        "leaderboard",
+        "cache-hash",
+        "cache-stability",
+        "memories",
+        "update-memory",
+        "profile",
+        "trust-report",
+        "redactions",
+        "evidence",
+        "quarantine",
+        "review",
+        "flight",
+        "context-diff",
+        "blame",
+        "explain-pack",
+        "test",
+        "ci-check",
+        "ask",
+        "suggest",
+        "warnings",
+        "proactive",
+        "ingest",
+        "shared-context",
+        "heatmap",
+        "report",
+        "dashboard",
+        "agents-score",
+        "badge",
+        "recipe",
+        "preflight",
         "recall",
         "search",
         "explain",
@@ -9281,6 +9588,2762 @@ fn context_pack_text(
     Ok(out)
 }
 
+#[derive(Debug, Clone)]
+struct AiContextReport {
+    task: String,
+    provider: String,
+    budget: usize,
+    workspace: String,
+    stable_prefix: String,
+    fresh_suffix: String,
+    compiled_prompt: String,
+    cache_plan: String,
+    runtime_notes: Vec<String>,
+    evidence: Vec<Value>,
+    omitted_summary: Vec<String>,
+    stale_summary: Vec<String>,
+    raw_tokens: usize,
+    compiled_tokens: usize,
+    cacheable_prefix_tokens: usize,
+    fresh_suffix_tokens: usize,
+    omitted_tokens: usize,
+    duplicate_blocked_tokens: usize,
+    stale_blocked_tokens: usize,
+    tool_bloat_blocked_tokens: usize,
+    secret_like_blocks: usize,
+    prompt_injection_warnings: usize,
+}
+
+impl AiContextReport {
+    fn kv_positions_avoided(&self) -> usize {
+        self.raw_tokens.saturating_sub(self.fresh_suffix_tokens)
+    }
+
+    fn reduction_percent(&self) -> f32 {
+        if self.raw_tokens == 0 {
+            0.0
+        } else {
+            ((self.raw_tokens.saturating_sub(self.compiled_tokens) as f32) / self.raw_tokens as f32)
+                * 100.0
+        }
+    }
+
+    fn secret_like_tokens(&self) -> usize {
+        self.secret_like_blocks.saturating_mul(64)
+    }
+
+    fn low_relevance_tokens(&self) -> usize {
+        self.omitted_tokens.saturating_sub(
+            self.duplicate_blocked_tokens
+                .saturating_add(self.stale_blocked_tokens)
+                .saturating_add(self.tool_bloat_blocked_tokens)
+                .saturating_add(self.secret_like_tokens()),
+        )
+    }
+
+    fn signal_density_before(&self) -> f32 {
+        if self.raw_tokens == 0 {
+            return 1.0;
+        }
+        let noise = self
+            .duplicate_blocked_tokens
+            .saturating_add(self.stale_blocked_tokens)
+            .saturating_add(self.tool_bloat_blocked_tokens)
+            .saturating_add(self.secret_like_tokens())
+            .saturating_add(self.low_relevance_tokens());
+        self.raw_tokens.saturating_sub(noise) as f32 / self.raw_tokens as f32
+    }
+
+    fn signal_density_after(&self) -> f32 {
+        if self.compiled_tokens == 0 {
+            1.0
+        } else {
+            let warning_noise = self.prompt_injection_warnings.saturating_mul(32);
+            self.compiled_tokens.saturating_sub(warning_noise) as f32 / self.compiled_tokens as f32
+        }
+    }
+
+    fn signal_density_score(&self) -> f32 {
+        self.signal_density_after()
+    }
+
+    fn signal_density_improvement(&self) -> f32 {
+        let before = self.signal_density_before().max(0.001);
+        self.signal_density_after() / before
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "task": self.task,
+            "provider": self.provider,
+            "budget": self.budget,
+            "workspace": self.workspace,
+            "compiled_prompt": self.compiled_prompt,
+            "stable_prefix": self.stable_prefix,
+            "fresh_suffix": self.fresh_suffix,
+            "cache_plan": self.cache_plan,
+            "runtime_notes": self.runtime_notes,
+            "evidence": self.evidence,
+            "omitted_context_summary": self.omitted_summary,
+            "stale_or_contradicted_context_summary": self.stale_summary,
+            "token_report": {
+                "raw_context_tokens": self.raw_tokens,
+                "compiled_context_tokens": self.compiled_tokens,
+                "cacheable_prefix_tokens": self.cacheable_prefix_tokens,
+                "fresh_suffix_tokens": self.fresh_suffix_tokens,
+                "omitted_tokens": self.omitted_tokens,
+                "duplicate_blocked_tokens": self.duplicate_blocked_tokens,
+                "stale_blocked_tokens": self.stale_blocked_tokens,
+                "low_relevance_tokens": self.low_relevance_tokens(),
+                "tool_history_bloat_blocked_tokens": self.tool_bloat_blocked_tokens,
+                "tool_trace_tokens_compressed": self.tool_bloat_blocked_tokens,
+                "secret_like_strings_blocked": self.secret_like_blocks,
+                "prompt_injection_warnings": self.prompt_injection_warnings,
+                "estimated_prefill_reduction_percent": format!("{:.1}", self.reduction_percent()),
+                "estimated_kv_positions_avoided": self.kv_positions_avoided(),
+                "estimated_context_reduction_percent": format!("{:.1}", self.reduction_percent()),
+                "signal_density_before": format!("{:.2}", self.signal_density_before()),
+                "signal_density_after": format!("{:.2}", self.signal_density_after()),
+                "signal_density_improvement": format!("{:.2}x", self.signal_density_improvement()),
+            }
+        })
+    }
+}
+
+fn estimate_tokens(text: &str) -> usize {
+    let chars = text.chars().count();
+    if chars == 0 {
+        0
+    } else {
+        chars.div_ceil(4)
+    }
+}
+
+fn normalize_provider(provider: &str) -> String {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "openai" | "gpt" => "openai",
+        "claude" | "anthropic" => "claude",
+        "gemini" | "google" => "gemini",
+        "codex" => "codex",
+        "cursor" => "cursor",
+        "continue" => "continue",
+        "mcp" => "mcp",
+        "local" | "ollama" | "generic" | "" => "generic",
+        other => other,
+    }
+    .to_string()
+}
+
+fn option_usize(rest: &[String], flag: &str, default: usize) -> usize {
+    cli_flag_value(rest, flag)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn task_from_rest(rest: &[String], default_task: &str) -> String {
+    let value_flags = [
+        "--provider",
+        "--budget",
+        "--tokens",
+        "--for",
+        "--target",
+        "--runtime",
+        "--output",
+        "--workspace",
+        "--file",
+        "--severity",
+        "--applies-to",
+        "--superseded-by",
+        "--id",
+        "--limit",
+        "--max-kv-tokens",
+        "--from",
+        "--every",
+    ];
+    let mut skip_next = false;
+    let mut words = Vec::new();
+    for item in rest {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if value_flags.contains(&item.as_str()) {
+            skip_next = true;
+            continue;
+        }
+        if item.starts_with("--") {
+            continue;
+        }
+        words.push(item.clone());
+    }
+    let task = words.join(" ");
+    if task.trim().is_empty() {
+        default_task.to_string()
+    } else {
+        task.trim().to_string()
+    }
+}
+
+fn has_task_like_positional(rest: &[String]) -> bool {
+    !task_from_rest(rest, "").is_empty()
+}
+
+fn memory_text(memory: &memory_core::StoredMemory) -> String {
+    if memory.content.trim().is_empty() {
+        memory.summary.clone()
+    } else {
+        memory.content.clone()
+    }
+}
+
+fn normalized_dedupe_key(text: &str) -> String {
+    text.to_ascii_lowercase()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || ch.is_ascii_whitespace())
+        .collect::<String>()
+        .split_whitespace()
+        .take(32)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn is_memory_stale_or_blocked(memory: &memory_core::StoredMemory) -> bool {
+    matches!(
+        memory.attributes.status,
+        MemoryStatus::Superseded | MemoryStatus::Contradicted | MemoryStatus::Forgotten
+    ) || memory
+        .attributes
+        .tags
+        .iter()
+        .any(|tag| matches!(tag.as_str(), "stale" | "superseded" | "contradiction"))
+}
+
+fn has_prompt_injection_warning(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    [
+        "ignore previous instructions",
+        "ignore all previous",
+        "system prompt",
+        "exfiltrate",
+        "reveal secrets",
+        "bypass",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn source_label(memory: &memory_core::StoredMemory) -> String {
+    memory
+        .attributes
+        .source
+        .as_ref()
+        .and_then(|source| {
+            source
+                .source_file
+                .clone()
+                .or(source.source_commit.clone())
+                .or(source.source.clone())
+        })
+        .unwrap_or_else(|| "local memory".to_string())
+}
+
+fn provider_cache_plan(
+    provider: &str,
+    stable_prefix_tokens: usize,
+    fresh_suffix_tokens: usize,
+) -> String {
+    match normalize_provider(provider).as_str() {
+        "openai" => format!(
+            "OpenAI cache plan:\n- Put stable repo memory, rules, decisions, and tool schemas first.\n- Keep that stable prefix byte-for-byte stable between calls when possible.\n- Put the latest user request, error, and tool output at the end.\n- stable_prefix: ~{stable_prefix_tokens} tokens\n- fresh_suffix: ~{fresh_suffix_tokens} tokens"
+        ),
+        "claude" => format!(
+            "Claude cache plan:\n- Cache breakpoint 1: system/app policy.\n- Cache breakpoint 2: repo and user memory.\n- Cache breakpoint 3: tool schemas, if present.\n- Do not cache the fresh request.\n- cacheable_blocks: policy, memory, tools\n- fresh_suffix: ~{fresh_suffix_tokens} tokens"
+        ),
+        "gemini" => format!(
+            "Gemini cache plan:\n- cachedContent group: app policy, long TTL.\n- cachedContent group: repo memory, medium TTL.\n- cachedContent group: session memory, short TTL.\n- Fresh request: no cache.\n- stable_prefix: ~{stable_prefix_tokens} tokens"
+        ),
+        "codex" | "cursor" | "continue" | "mcp" => format!(
+            "AI coding tool cache plan:\n- Keep repo rules and decisions in the reusable context block.\n- Refresh dynamic task/error data separately.\n- stable_prefix: ~{stable_prefix_tokens} tokens\n- fresh_suffix: ~{fresh_suffix_tokens} tokens"
+        ),
+        _ => format!(
+            "Generic/local cache plan:\n- Use the compact prompt below.\n- Reuse the stable prefix across batched requests where your runtime supports it.\n- Keep fresh task suffix separate.\n- Runtime KV quantization and speculative decoding can still be enabled separately when supported.\n- stable_prefix: ~{stable_prefix_tokens} tokens"
+        ),
+    }
+}
+
+fn build_ai_context_report(
+    engine: &MemoryEngine,
+    task: &str,
+    provider: &str,
+    budget: usize,
+    workspace: Option<String>,
+) -> Result<AiContextReport> {
+    let provider = normalize_provider(provider);
+    let workspace = workspace
+        .or(current_workspace_name(engine)?)
+        .unwrap_or_else(|| "default".to_string());
+    let query_text =
+        format!("{task} decisions failures fixes rules mistakes commands files risks context");
+    let mut candidates = engine.search(
+        RecallQuery::new(query_text)
+            .workspace(workspace.clone())
+            .limit(48)
+            .candidate_pool(96)
+            .include_content(true)
+            .include_inactive(true),
+    )?;
+    let mut mistake_candidates = engine.search(
+        RecallQuery::new(format!("{task} hard rules mistakes never do not"))
+            .workspace(workspace.clone())
+            .limit(16)
+            .include_content(true)
+            .tag("mistake"),
+    )?;
+    candidates.append(&mut mistake_candidates);
+    candidates.sort_by(|left, right| {
+        let left_rule = left
+            .memory
+            .attributes
+            .tags
+            .iter()
+            .any(|tag| tag == "mistake") as i32;
+        let right_rule = right
+            .memory
+            .attributes
+            .tags
+            .iter()
+            .any(|tag| tag == "mistake") as i32;
+        right_rule
+            .cmp(&left_rule)
+            .then_with(|| right.score.total_cmp(&left.score))
+    });
+
+    let stats = engine.stats()?;
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let repo_summary = read_readme_brief(&repo_root).unwrap_or_default();
+    let raw_tokens = ((stats.bytes as usize) / 4)
+        .saturating_add(estimate_tokens(&repo_summary))
+        .max(estimate_tokens(task));
+
+    let mut seen = HashSet::new();
+    let mut selected = Vec::new();
+    let mut omitted_summary = Vec::new();
+    let mut stale_summary = Vec::new();
+    let mut selected_tokens = 0usize;
+    let mut duplicate_blocked_tokens = 0usize;
+    let mut stale_blocked_tokens = 0usize;
+    let mut tool_bloat_blocked_tokens = 0usize;
+    let mut secret_like_blocks = 0usize;
+    let mut prompt_injection_warnings = 0usize;
+    let selection_budget = budget.saturating_sub(260).max(320);
+
+    for candidate in candidates {
+        let text = memory_text(&candidate.memory);
+        let tokens = estimate_tokens(&text);
+        if detect_sensitive_reason(&text).is_some() {
+            secret_like_blocks += 1;
+            omitted_summary.push(format!(
+                "secret-like memory {} redacted",
+                candidate.memory.id
+            ));
+            continue;
+        }
+        if has_prompt_injection_warning(&text) {
+            prompt_injection_warnings += 1;
+            omitted_summary.push(format!(
+                "prompt-injection-like memory {} omitted",
+                candidate.memory.id
+            ));
+            continue;
+        }
+        if is_memory_stale_or_blocked(&candidate.memory) {
+            stale_blocked_tokens += tokens;
+            stale_summary.push(format!(
+                "{} [{}]",
+                candidate.memory.summary, candidate.memory.id
+            ));
+            continue;
+        }
+        let key = normalized_dedupe_key(&text);
+        if !key.is_empty() && !seen.insert(key) {
+            duplicate_blocked_tokens += tokens;
+            continue;
+        }
+        if candidate
+            .memory
+            .attributes
+            .tags
+            .iter()
+            .any(|tag| tag == "tool_trace_summary" || tag == "agent_trace_summary")
+            && tokens > 220
+        {
+            tool_bloat_blocked_tokens += tokens.saturating_sub(180);
+        }
+        let is_hard_rule = candidate
+            .memory
+            .attributes
+            .tags
+            .iter()
+            .any(|tag| matches!(tag.as_str(), "mistake" | "critical" | "hard"));
+        if selected_tokens.saturating_add(tokens) > selection_budget && !is_hard_rule {
+            omitted_summary.push(format!(
+                "{} [{}] omitted to fit budget",
+                candidate.memory.summary, candidate.memory.id
+            ));
+            continue;
+        }
+        selected_tokens = selected_tokens.saturating_add(tokens);
+        selected.push(candidate);
+    }
+
+    let commands = infer_run_commands(&repo_root);
+    let important = important_files(&repo_root);
+    let mut facts = Vec::new();
+    let mut decisions = Vec::new();
+    let mut failures = Vec::new();
+    let mut rules = Vec::new();
+    let mut do_not_touch = Vec::new();
+    let mut evidence = Vec::new();
+
+    for item in &selected {
+        let text = memory_text(&item.memory);
+        let line = format!(
+            "{} ({}, source: {})",
+            text.lines().next().unwrap_or("").trim(),
+            item.memory.id,
+            source_label(&item.memory)
+        );
+        let lower = text.to_ascii_lowercase();
+        if item
+            .memory
+            .attributes
+            .tags
+            .iter()
+            .any(|tag| tag == "mistake")
+            || matches!(
+                item.memory.kind,
+                MemoryKind::Workflow | MemoryKind::Preference
+            )
+            || lower.contains("never ")
+            || lower.contains("do not")
+        {
+            rules.push(line.clone());
+        } else if matches!(item.memory.kind, MemoryKind::Decision) {
+            decisions.push(line.clone());
+        } else if matches!(item.memory.kind, MemoryKind::Bug)
+            || item.memory.attributes.tags.iter().any(|tag| {
+                matches!(
+                    tag.as_str(),
+                    "failure" | "fix" | "bug" | "ci" | "tool_trace_summary"
+                )
+            })
+            || lower.contains("error")
+            || lower.contains("failed")
+            || lower.contains("fix")
+        {
+            failures.push(line.clone());
+        } else {
+            facts.push(line.clone());
+        }
+        if lower.contains("do not") || lower.contains("never ") || lower.contains("do-not-touch") {
+            do_not_touch.push(line.clone());
+        }
+        evidence.push(json!({
+            "id": item.memory.id,
+            "kind": item.memory.kind.as_str(),
+            "score": format!("{:.3}", item.score),
+            "source": source_label(&item.memory),
+        }));
+    }
+
+    let stable_prefix = render_stable_prefix(&facts, &decisions, &rules, &do_not_touch);
+    let fresh_suffix = render_fresh_suffix(task, &failures, &commands, &important);
+    let cacheable_prefix_tokens = estimate_tokens(&stable_prefix);
+    let fresh_suffix_tokens = estimate_tokens(&fresh_suffix);
+    let cache_plan = provider_cache_plan(&provider, cacheable_prefix_tokens, fresh_suffix_tokens);
+    let runtime_notes = vec![
+        "memory.cpp reduces KV pressure by preventing unnecessary tokens from entering the model."
+            .to_string(),
+        "Estimated KV numbers are approximate token-position savings, not exact speedups."
+            .to_string(),
+        "Runtime KV quantization, prefix reuse, batching, and speculative decoding remain separate optional runtime features where supported."
+            .to_string(),
+    ];
+    let compiled_prompt = render_compiled_prompt(
+        task,
+        &provider,
+        &facts,
+        &decisions,
+        &failures,
+        &rules,
+        &do_not_touch,
+        &commands,
+        &important,
+        &omitted_summary,
+        &stale_summary,
+        &cache_plan,
+        &runtime_notes,
+        &evidence,
+    );
+    let compiled_tokens = estimate_tokens(&compiled_prompt).min(budget.max(estimate_tokens(task)));
+    let omitted_tokens = raw_tokens.saturating_sub(compiled_tokens);
+
+    Ok(AiContextReport {
+        task: task.to_string(),
+        provider,
+        budget,
+        workspace,
+        stable_prefix,
+        fresh_suffix,
+        compiled_prompt,
+        cache_plan,
+        runtime_notes,
+        evidence,
+        omitted_summary,
+        stale_summary,
+        raw_tokens,
+        compiled_tokens,
+        cacheable_prefix_tokens,
+        fresh_suffix_tokens,
+        omitted_tokens,
+        duplicate_blocked_tokens,
+        stale_blocked_tokens,
+        tool_bloat_blocked_tokens,
+        secret_like_blocks,
+        prompt_injection_warnings,
+    })
+}
+
+fn render_stable_prefix(
+    facts: &[String],
+    decisions: &[String],
+    rules: &[String],
+    do_not_touch: &[String],
+) -> String {
+    let mut out = String::new();
+    out.push_str("Stable memory/rules prefix\n");
+    push_markdown_list(&mut out, "Critical facts", facts, 6);
+    push_markdown_list(&mut out, "Relevant decisions", decisions, 8);
+    push_markdown_list(&mut out, "Rules and mistake firewall", rules, 8);
+    push_markdown_list(&mut out, "Do-not-touch warnings", do_not_touch, 6);
+    out
+}
+
+fn render_fresh_suffix(
+    task: &str,
+    failures: &[String],
+    commands: &[String],
+    important: &[String],
+) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("Fresh task suffix\nTask: {task}\n"));
+    push_markdown_list(&mut out, "Prior failures/fixes", failures, 8);
+    push_markdown_list(&mut out, "Commands/tests", commands, 8);
+    push_markdown_list(&mut out, "Must-read files", important, 8);
+    out
+}
+
+fn push_markdown_list(out: &mut String, title: &str, items: &[String], limit: usize) {
+    out.push_str(&format!("\n## {title}\n"));
+    if items.is_empty() {
+        out.push_str("- No high-signal local memory found.\n");
+    } else {
+        for item in items.iter().take(limit) {
+            out.push_str(&format!("- {}\n", item.trim()));
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_compiled_prompt(
+    task: &str,
+    provider: &str,
+    facts: &[String],
+    decisions: &[String],
+    failures: &[String],
+    rules: &[String],
+    do_not_touch: &[String],
+    commands: &[String],
+    important: &[String],
+    omitted: &[String],
+    stale: &[String],
+    cache_plan: &str,
+    runtime_notes: &[String],
+    evidence: &[Value],
+) -> String {
+    let mut out = String::new();
+    out.push_str("# memory.cpp compiled context pack\n\n");
+    out.push_str(&format!("Task: {task}\n"));
+    out.push_str(&format!("Provider: {provider}\n"));
+    out.push_str(
+        "Local-first note: generated locally. Review before sharing. Estimates are approximate.\n",
+    );
+    push_markdown_list(&mut out, "Critical facts", facts, 6);
+    push_markdown_list(&mut out, "Relevant decisions", decisions, 8);
+    push_markdown_list(&mut out, "Prior failures/fixes", failures, 8);
+    push_markdown_list(&mut out, "Rules", rules, 8);
+    push_markdown_list(&mut out, "Do-not-touch warnings", do_not_touch, 6);
+    push_markdown_list(&mut out, "Commands/tests", commands, 8);
+    push_markdown_list(&mut out, "Must-read files", important, 8);
+    push_markdown_list(&mut out, "Omitted context summary", omitted, 8);
+    push_markdown_list(&mut out, "Stale/contradicted context summary", stale, 8);
+    out.push_str("\n## Cache plan\n");
+    out.push_str(cache_plan);
+    out.push('\n');
+    push_markdown_list(&mut out, "Runtime notes", runtime_notes, 8);
+    out.push_str("\n## Evidence\n");
+    if evidence.is_empty() {
+        out.push_str("- No local memory evidence found yet.\n");
+    } else {
+        for item in evidence.iter().take(12) {
+            out.push_str(&format!(
+                "- {} [{}] score {}\n",
+                item["id"].as_str().unwrap_or("unknown"),
+                item["kind"].as_str().unwrap_or("memory"),
+                item["score"].as_str().unwrap_or("?")
+            ));
+        }
+    }
+    out
+}
+
+fn ai_compile_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let provider = cli_flag_value(rest, "--provider")
+        .or_else(|| cli_flag_value(rest, "--target"))
+        .unwrap_or_else(|| "generic".to_string());
+    let budget = option_usize(rest, "--budget", option_usize(rest, "--tokens", 1500));
+    let workspace = cli_flag_value(rest, "--workspace");
+    let report = build_ai_context_report(engine, &task, &provider, budget, workspace)?;
+    record_savings_report(engine, &report)?;
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&report.to_json())?);
+    } else {
+        println!("{}", report.compiled_prompt);
+        print_token_report(&report);
+    }
+    if let Some(output) = cli_flag_path(rest, "--output") {
+        write_public_artifact(&output, &report.compiled_prompt, true)?;
+        println!("wrote compiled context: {}", output.display());
+    }
+    Ok(())
+}
+
+fn ai_pack_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let target = cli_flag_value(rest, "--for")
+        .or_else(|| cli_flag_value(rest, "--target"))
+        .unwrap_or_else(|| "generic".to_string());
+    let provider = normalize_provider(&target);
+    let budget = option_usize(rest, "--budget", 1500);
+    let workspace = cli_flag_value(rest, "--workspace");
+    let report = build_ai_context_report(engine, &task, &provider, budget, workspace)?;
+    record_savings_report(engine, &report)?;
+    let body = provider_pack_body(&target, &report);
+    let output = cli_flag_path(rest, "--output").unwrap_or_else(|| default_pack_path(&target));
+    if matches!(target.as_str(), "codex" | "gemini") && !cli_flag(rest, "--output") {
+        upsert_memory_block(&output, &body)?;
+    } else {
+        write_public_artifact(&output, &body, true)?;
+    }
+    println!("provider pack: {}", output.display());
+    println!("target: {target}");
+    println!("local-only: yes");
+    print_token_report(&report);
+    Ok(())
+}
+
+fn provider_pack_body(target: &str, report: &AiContextReport) -> String {
+    format!(
+        "<!-- memory.cpp:start -->\nGenerated at: {}\nTarget: {}\nSource memory ids: {}\n\n{}\n\n<!-- memory.cpp:end -->\n",
+        Utc::now().to_rfc3339(),
+        target,
+        report
+            .evidence
+            .iter()
+            .filter_map(|item| item["id"].as_str())
+            .take(16)
+            .collect::<Vec<_>>()
+            .join(", "),
+        report.compiled_prompt
+    )
+}
+
+fn default_pack_path(target: &str) -> PathBuf {
+    match target.to_ascii_lowercase().as_str() {
+        "codex" => PathBuf::from("AGENTS.md"),
+        "gemini" => PathBuf::from("GEMINI.md"),
+        other => PathBuf::from(".memory.cpp/packs").join(format!("{other}.md")),
+    }
+}
+
+fn upsert_memory_block(path: &Path, block: &str) -> Result<()> {
+    let start = "<!-- memory.cpp:start -->";
+    let end = "<!-- memory.cpp:end -->";
+    let existing = fs::read_to_string(path).unwrap_or_default();
+    let next =
+        if let (Some(start_index), Some(end_index)) = (existing.find(start), existing.find(end)) {
+            let end_index = end_index + end.len();
+            format!(
+                "{}{}{}",
+                &existing[..start_index],
+                block.trim_end(),
+                &existing[end_index..]
+            )
+        } else if existing.trim().is_empty() {
+            block.to_string()
+        } else {
+            format!("{}\n\n{}", existing.trim_end(), block)
+        };
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+    fs::write(path, next)?;
+    Ok(())
+}
+
+fn token_firewall_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let budget = option_usize(rest, "--budget", 2000);
+    let report = build_ai_context_report(engine, &task, &provider, budget, None)?;
+    record_savings_report(engine, &report)?;
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&firewall_json(&report))?);
+    } else {
+        print_firewall_report(&report);
+    }
+    Ok(())
+}
+
+fn firewall_json(report: &AiContextReport) -> Value {
+    json!({
+        "task": report.task,
+        "provider": report.provider,
+        "raw_context_available": report.raw_tokens,
+        "useful_context_selected": report.compiled_tokens,
+        "duplicate_context_blocked": report.duplicate_blocked_tokens,
+        "stale_context_blocked": report.stale_blocked_tokens,
+        "tool_history_bloat_blocked": report.tool_bloat_blocked_tokens,
+        "secret_like_strings_blocked": report.secret_like_blocks,
+        "prompt_injection_warnings": report.prompt_injection_warnings,
+        "estimated_reduction_percent": format!("{:.1}", report.reduction_percent()),
+    })
+}
+
+fn print_firewall_report(report: &AiContextReport) {
+    println!("TOKEN FIREWALL REPORT");
+    println!("Task: {}", report.task);
+    println!("Raw context available: {} tokens", report.raw_tokens);
+    println!("Useful context selected: {} tokens", report.compiled_tokens);
+    println!(
+        "Duplicate context blocked: {} tokens",
+        report.duplicate_blocked_tokens
+    );
+    println!(
+        "Stale context blocked: {} tokens",
+        report.stale_blocked_tokens
+    );
+    println!(
+        "Tool/history bloat blocked: {} tokens",
+        report.tool_bloat_blocked_tokens
+    );
+    println!("Secret-like strings blocked: {}", report.secret_like_blocks);
+    println!(
+        "Prompt-injection warnings: {}",
+        report.prompt_injection_warnings
+    );
+    println!("Estimated reduction: {:.1}%", report.reduction_percent());
+}
+
+fn firewall_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let base = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"));
+    let path = base.join("firewall.json");
+    match rest.first().map(String::as_str).unwrap_or("report") {
+        "on" => {
+            write_public_artifact(
+                &path,
+                &serde_json::to_string_pretty(&json!({"enabled": true}))?,
+                false,
+            )?;
+            println!("token firewall: on");
+        }
+        "off" => {
+            write_public_artifact(
+                &path,
+                &serde_json::to_string_pretty(&json!({"enabled": false}))?,
+                false,
+            )?;
+            println!("token firewall: off");
+        }
+        _ => {
+            let enabled = fs::read_to_string(&path)
+                .ok()
+                .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+                .and_then(|value| value["enabled"].as_bool())
+                .unwrap_or(true);
+            println!("token firewall report");
+            println!("enabled: {enabled}");
+            println!("last savings: {}", latest_savings_summary(engine)?);
+            println!("try: memory token-firewall \"current task\" --provider openai --budget 2000");
+        }
+    }
+    Ok(())
+}
+
+fn cache_plan_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let report = build_ai_context_report(engine, &task, &provider, budget, None)?;
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "task": report.task,
+                "provider": report.provider,
+                "stable_prefix": report.stable_prefix,
+                "fresh_suffix": report.fresh_suffix,
+                "cache_plan": report.cache_plan,
+            }))?
+        );
+    } else {
+        println!("Cache plan for {}", report.provider);
+        println!("Task: {}", report.task);
+        println!("{}", report.cache_plan);
+    }
+    Ok(())
+}
+
+fn kv_report_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let report = build_ai_context_report(engine, &task, &provider, budget, None)?;
+    record_savings_report(engine, &report)?;
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&kv_json(&report))?);
+    } else {
+        print_kv_report(&report);
+    }
+    Ok(())
+}
+
+fn kv_json(report: &AiContextReport) -> Value {
+    json!({
+        "task": report.task,
+        "provider": report.provider,
+        "raw_context_tokens": report.raw_tokens,
+        "compiled_context_tokens": report.compiled_tokens,
+        "cacheable_prefix_tokens": report.cacheable_prefix_tokens,
+        "fresh_suffix_tokens": report.fresh_suffix_tokens,
+        "omitted_tokens": report.omitted_tokens,
+        "duplicate_tokens_blocked": report.duplicate_blocked_tokens,
+        "stale_tokens_blocked": report.stale_blocked_tokens,
+        "tool_trace_tokens_compressed": report.tool_bloat_blocked_tokens,
+        "secret_like_strings_blocked": report.secret_like_blocks,
+        "prompt_injection_warnings": report.prompt_injection_warnings,
+        "estimated_kv_positions_avoided": report.kv_positions_avoided(),
+        "estimated_prefill_reduction_percent": format!("{:.1}", report.reduction_percent()),
+        "estimated_context_reduction_percent": format!("{:.1}", report.reduction_percent()),
+        "signal_density_before": format!("{:.2}", report.signal_density_before()),
+        "signal_density_after": format!("{:.2}", report.signal_density_after()),
+        "signal_density_improvement": format!("{:.2}x", report.signal_density_improvement()),
+        "provider_cache_plan": report.cache_plan,
+        "runtime_plan": runtime_strategy_text("generic"),
+        "runtime_notes": report.runtime_notes,
+    })
+}
+
+fn print_kv_report(report: &AiContextReport) {
+    println!("KV PRESSURE REPORT");
+    println!("Task: {}", report.task);
+    println!("Raw context tokens: {}", report.raw_tokens);
+    println!("Compiled context tokens: {}", report.compiled_tokens);
+    println!(
+        "Cacheable prefix tokens: {}",
+        report.cacheable_prefix_tokens
+    );
+    println!("Fresh suffix tokens: {}", report.fresh_suffix_tokens);
+    println!("Omitted tokens: {}", report.omitted_tokens);
+    println!(
+        "Estimated KV pressure avoided: {} token positions",
+        report.kv_positions_avoided()
+    );
+    println!(
+        "Estimated context reduction: {:.1}%",
+        report.reduction_percent()
+    );
+    println!("Runtime notes:");
+    for note in &report.runtime_notes {
+        println!("- {note}");
+    }
+}
+
+fn print_token_report(report: &AiContextReport) {
+    println!("\nTOKEN REPORT");
+    println!("Raw context available: {} tokens", report.raw_tokens);
+    println!("Compiled context: {} tokens", report.compiled_tokens);
+    println!(
+        "Cacheable prefix: {} tokens",
+        report.cacheable_prefix_tokens
+    );
+    println!("Fresh suffix: {} tokens", report.fresh_suffix_tokens);
+    println!("Omitted: {} tokens", report.omitted_tokens);
+    println!(
+        "Estimated KV pressure avoided: {} token positions",
+        report.kv_positions_avoided()
+    );
+    println!(
+        "Estimated context reduction: {:.1}%",
+        report.reduction_percent()
+    );
+}
+
+fn stable_hash(input: &str) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    input.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn provider_cache_strategy(report: &AiContextReport) -> String {
+    report
+        .cache_plan
+        .lines()
+        .next()
+        .unwrap_or("Generic cache plan")
+        .trim_end_matches(':')
+        .to_string()
+}
+
+fn runtime_profile(runtime: &str) -> Value {
+    match runtime.trim().to_ascii_lowercase().as_str() {
+        "llama.cpp" | "llamacpp" => json!({
+            "runtime": "llama.cpp",
+            "recommended_context_budget": 4096,
+            "prefix_reuse_hint": "Keep stable memory/rules first and reuse the same prefix for repeated local runs.",
+            "kv_quantization_hint": "If your runtime build supports KV quantization, consider enabling it separately; memory.cpp only reduces prompt tokens.",
+            "speculative_decoding_hint": "Use shorter compiled prompts so speculative decoding has less prompt noise to process.",
+            "batching_hint": "Batch prompts that share the same stable prefix and vary only the fresh suffix.",
+            "dynamic_suffix_placement": "Place latest user request, tool output, and errors last.",
+            "kernel_warning": "memory.cpp does not implement low-level kernels by default."
+        }),
+        "ollama" => json!({
+            "runtime": "ollama",
+            "recommended_context_budget": 4096,
+            "prefix_reuse_hint": "Keep reusable repo memory in the front of each prompt or Modelfile-style system block when appropriate.",
+            "kv_quantization_hint": "Use runtime/model configuration if supported; memory.cpp does not enable KV quantization directly.",
+            "speculative_decoding_hint": "Prefer compact context packs before experimenting with runtime decoding settings.",
+            "batching_hint": "Group similar requests manually through memory batch-plan when using a shared prompt prefix.",
+            "dynamic_suffix_placement": "Append fresh task state and current error after stable memory.",
+            "kernel_warning": "memory.cpp does not implement low-level kernels by default."
+        }),
+        "vllm" => json!({
+            "runtime": "vllm",
+            "recommended_context_budget": 8192,
+            "prefix_reuse_hint": "Use stable prefixes across batched requests so the serving layer can exploit prefix/cache reuse where configured.",
+            "kv_quantization_hint": "Configure any KV/cache optimization in the runtime; memory.cpp only prepares smaller prompts.",
+            "speculative_decoding_hint": "Keep stable prompt segments separate from fresh suffixes to simplify serving-level optimization.",
+            "batching_hint": "Batch requests with identical stable prefixes and short dynamic suffixes.",
+            "dynamic_suffix_placement": "Keep per-request task data last.",
+            "kernel_warning": "memory.cpp does not implement low-level kernels by default."
+        }),
+        "sglang" => json!({
+            "runtime": "sglang",
+            "recommended_context_budget": 8192,
+            "prefix_reuse_hint": "Separate reusable memory blocks from dynamic task suffixes in the program prompt.",
+            "kv_quantization_hint": "Use runtime-supported cache settings separately; memory.cpp is a context compiler.",
+            "speculative_decoding_hint": "Compiled context can make speculative paths less noisy.",
+            "batching_hint": "Group shared-prefix requests; see memory batch-plan.",
+            "dynamic_suffix_placement": "Fresh user input, latest tool output, and current error should be last.",
+            "kernel_warning": "memory.cpp does not implement low-level kernels by default."
+        }),
+        _ => json!({
+            "runtime": "generic",
+            "recommended_context_budget": 4096,
+            "prefix_reuse_hint": "Reuse the stable prefix for repeated requests when your runtime/provider supports prefix caching.",
+            "kv_quantization_hint": "Optional runtime feature; memory.cpp does not enable it directly.",
+            "speculative_decoding_hint": "Shorter compiled prompts can reduce prompt-side work before decoding.",
+            "batching_hint": "Batch requests with the same stable prefix and different fresh suffixes.",
+            "dynamic_suffix_placement": "Keep latest request, current error, and latest tool output at the end.",
+            "kernel_warning": "memory.cpp does not implement low-level kernels by default."
+        }),
+    }
+}
+
+fn runtime_strategy_text(runtime: &str) -> String {
+    let profile = runtime_profile(runtime);
+    format!(
+        "{}: {}; {}; warning: {}",
+        profile["runtime"].as_str().unwrap_or("generic"),
+        profile["prefix_reuse_hint"]
+            .as_str()
+            .unwrap_or("reuse stable prefix"),
+        profile["dynamic_suffix_placement"]
+            .as_str()
+            .unwrap_or("put fresh suffix last"),
+        profile["kernel_warning"].as_str().unwrap_or("")
+    )
+}
+
+fn inference_cost_stack_json(report: &AiContextReport, runtime: &str) -> Value {
+    json!({
+        "raw_context_tokens": report.raw_tokens,
+        "compiled_context_tokens": report.compiled_tokens,
+        "fresh_suffix_tokens": report.fresh_suffix_tokens,
+        "cacheable_prefix_tokens": report.cacheable_prefix_tokens,
+        "omitted_tokens": report.omitted_tokens,
+        "estimated_prefill_reduction_percent": format!("{:.1}", report.reduction_percent()),
+        "estimated_kv_positions_avoided": report.kv_positions_avoided(),
+        "signal_density_score": format!("{:.2}", report.signal_density_score()),
+        "duplicate_context_tokens_blocked": report.duplicate_blocked_tokens,
+        "stale_context_tokens_blocked": report.stale_blocked_tokens,
+        "tool_trace_tokens_compressed": report.tool_bloat_blocked_tokens,
+        "provider_cache_strategy": provider_cache_strategy(report),
+        "runtime_strategy": runtime_strategy_text(runtime),
+    })
+}
+
+fn print_inference_cost_stack(report: &AiContextReport, runtime: &str) {
+    let stack = inference_cost_stack_json(report, runtime);
+    println!("\nInference Cost Stack");
+    println!("raw_context_tokens: {}", stack["raw_context_tokens"]);
+    println!(
+        "compiled_context_tokens: {}",
+        stack["compiled_context_tokens"]
+    );
+    println!("fresh_suffix_tokens: {}", stack["fresh_suffix_tokens"]);
+    println!(
+        "cacheable_prefix_tokens: {}",
+        stack["cacheable_prefix_tokens"]
+    );
+    println!("omitted_tokens: {}", stack["omitted_tokens"]);
+    println!(
+        "estimated_prefill_reduction_percent: {}",
+        stack["estimated_prefill_reduction_percent"]
+    );
+    println!(
+        "estimated_kv_positions_avoided: {}",
+        stack["estimated_kv_positions_avoided"]
+    );
+    println!("signal_density_score: {}", stack["signal_density_score"]);
+    println!(
+        "duplicate_context_tokens_blocked: {}",
+        stack["duplicate_context_tokens_blocked"]
+    );
+    println!(
+        "stale_context_tokens_blocked: {}",
+        stack["stale_context_tokens_blocked"]
+    );
+    println!(
+        "tool_trace_tokens_compressed: {}",
+        stack["tool_trace_tokens_compressed"]
+    );
+    println!(
+        "provider_cache_strategy: {}",
+        stack["provider_cache_strategy"].as_str().unwrap_or("")
+    );
+    println!(
+        "runtime_strategy: {}",
+        stack["runtime_strategy"].as_str().unwrap_or("")
+    );
+}
+
+fn waste_sources(report: &AiContextReport) -> Vec<(&'static str, usize)> {
+    let mut rows = vec![
+        ("duplicate context", report.duplicate_blocked_tokens),
+        ("stale context", report.stale_blocked_tokens),
+        ("tool/history bloat", report.tool_bloat_blocked_tokens),
+        ("secret-like content", report.secret_like_tokens()),
+        (
+            "low relevance or over budget",
+            report.low_relevance_tokens(),
+        ),
+    ];
+    rows.sort_by_key(|row| std::cmp::Reverse(row.1));
+    rows
+}
+
+fn prefill_report_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let report = build_ai_context_report(engine, &task, &provider, budget, None)?;
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "task": report.task,
+                "raw_prompt_tokens": report.raw_tokens,
+                "compiled_prompt_tokens": report.compiled_tokens,
+                "cacheable_prefix_tokens": report.cacheable_prefix_tokens,
+                "fresh_suffix_tokens": report.fresh_suffix_tokens,
+                "estimated_prefill_reduction": format!("{:.1}%", report.reduction_percent()),
+                "main_waste_sources": waste_sources(&report),
+                "recommended_fix": format!("memory compile \"{}\" --provider {} --budget {}", report.task, report.provider, report.budget),
+            }))?
+        );
+        return Ok(());
+    }
+    println!("PREFILL REPORT");
+    println!("Raw prompt tokens: {}", report.raw_tokens);
+    println!("Compiled prompt tokens: {}", report.compiled_tokens);
+    println!(
+        "Cacheable prefix tokens: {}",
+        report.cacheable_prefix_tokens
+    );
+    println!("Fresh suffix tokens: {}", report.fresh_suffix_tokens);
+    println!(
+        "Estimated prefill reduction: {:.1}%",
+        report.reduction_percent()
+    );
+    println!("Main waste sources:");
+    for (label, tokens) in waste_sources(&report)
+        .into_iter()
+        .filter(|(_, tokens)| *tokens > 0)
+    {
+        println!("- {label}: {tokens} tokens");
+    }
+    println!(
+        "Recommended fix: memory compile \"{}\" --provider {} --budget {}",
+        report.task, report.provider, report.budget
+    );
+    Ok(())
+}
+
+fn kv_budget_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let max_kv_tokens = option_usize(rest, "--max-kv-tokens", 4096);
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let report = build_ai_context_report(engine, &task, &provider, max_kv_tokens, None)?;
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "task": report.task,
+                "max_kv_tokens": max_kv_tokens,
+                "compiled_context_tokens": report.compiled_tokens,
+                "within_budget": report.compiled_tokens <= max_kv_tokens,
+                "estimated_kv_positions_avoided": report.kv_positions_avoided(),
+                "policy": "prefer compact durable memories, high-evidence summaries, and non-stale context",
+            }))?
+        );
+        return Ok(());
+    }
+    println!("KV BUDGET REPORT");
+    println!("Task: {}", report.task);
+    println!("Max KV tokens: {max_kv_tokens}");
+    println!("Compiled context tokens: {}", report.compiled_tokens);
+    println!(
+        "Within budget: {}",
+        if report.compiled_tokens <= max_kv_tokens {
+            "yes"
+        } else {
+            "no"
+        }
+    );
+    println!(
+        "Estimated KV positions avoided: {}",
+        report.kv_positions_avoided()
+    );
+    println!("Selection policy:");
+    println!("- Prefer compact durable memories over raw logs.");
+    println!("- Prefer high-evidence summaries over long documents.");
+    println!("- Exclude stale/superseded memories.");
+    Ok(())
+}
+
+fn signal_density_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let report = build_ai_context_report(engine, &task, &provider, budget, None)?;
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "useful_context_tokens": report.compiled_tokens,
+                "duplicate_tokens": report.duplicate_blocked_tokens,
+                "stale_tokens": report.stale_blocked_tokens,
+                "low_relevance_tokens": report.low_relevance_tokens(),
+                "tool_history_bloat_tokens": report.tool_bloat_blocked_tokens,
+                "secret_like_tokens": report.secret_like_tokens(),
+                "signal_density": format!("{:.2}", report.signal_density_score()),
+                "before": format!("{:.2}", report.signal_density_before()),
+                "after": format!("{:.2}", report.signal_density_after()),
+            }))?
+        );
+        return Ok(());
+    }
+    println!("SIGNAL DENSITY REPORT");
+    println!("Useful context tokens: {}", report.compiled_tokens);
+    println!("Duplicate tokens: {}", report.duplicate_blocked_tokens);
+    println!("Stale tokens: {}", report.stale_blocked_tokens);
+    println!("Low-relevance tokens: {}", report.low_relevance_tokens());
+    println!(
+        "Tool/history bloat tokens: {}",
+        report.tool_bloat_blocked_tokens
+    );
+    println!("Secret-like tokens: {}", report.secret_like_tokens());
+    println!("Signal density: {:.2}", report.signal_density_score());
+    println!("Before: {:.2}", report.signal_density_before());
+    println!("After: {:.2}", report.signal_density_after());
+    Ok(())
+}
+
+fn batch_requests_from_file(path: &Path) -> Result<Vec<String>> {
+    let raw = fs::read_to_string(path)?;
+    let value: Value = serde_json::from_str(&raw)
+        .with_context(|| format!("failed to parse batch request file {}", path.display()))?;
+    let array = value
+        .as_array()
+        .or_else(|| value.get("requests").and_then(Value::as_array))
+        .ok_or_else(|| anyhow!("batch request file must be an array or {{\"requests\": [...]}}"))?;
+    let mut tasks = Vec::new();
+    for item in array {
+        if let Some(text) = item.as_str() {
+            tasks.push(text.to_string());
+        } else if let Some(text) = item
+            .get("task")
+            .or_else(|| item.get("query"))
+            .or_else(|| item.get("request"))
+            .or_else(|| item.get("text"))
+            .and_then(Value::as_str)
+        {
+            tasks.push(text.to_string());
+        }
+    }
+    if tasks.is_empty() {
+        return Err(anyhow!("no task strings found in batch request file"));
+    }
+    Ok(tasks)
+}
+
+fn batch_plan_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let file = cli_flag_path(rest, "--file").ok_or_else(|| {
+        anyhow!("usage: memory batch-plan --file requests.json --provider openai")
+    })?;
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let mut groups: HashMap<String, Vec<AiContextReport>> = HashMap::new();
+    for task in batch_requests_from_file(&file)? {
+        let report = build_ai_context_report(engine, &task, &provider, budget, None)?;
+        groups
+            .entry(stable_hash(&report.stable_prefix))
+            .or_default()
+            .push(report);
+    }
+    let rows = groups
+        .iter()
+        .enumerate()
+        .map(|(index, (hash, reports))| {
+            let prefix_tokens = reports
+                .first()
+                .map(|report| report.cacheable_prefix_tokens)
+                .unwrap_or(0);
+            let repeated_tokens_avoided = prefix_tokens.saturating_mul(reports.len().saturating_sub(1));
+            json!({
+                "group_id": format!("group-{}", index + 1),
+                "stable_prefix_hash": hash,
+                "shared_stable_prefix_token_count": prefix_tokens,
+                "per_request_fresh_suffix_tokens": reports.iter().map(|report| json!({"task": report.task, "fresh_suffix_tokens": report.fresh_suffix_tokens})).collect::<Vec<_>>(),
+                "cache_strategy": provider_cache_strategy(reports.first().expect("group has report")),
+                "estimated_repeated_tokens_avoided": repeated_tokens_avoided,
+            })
+        })
+        .collect::<Vec<_>>();
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({"batch_groups": rows}))?
+        );
+        return Ok(());
+    }
+    println!("BATCH PLAN");
+    println!("Provider: {}", normalize_provider(&provider));
+    println!("Batch groups:");
+    for row in rows {
+        println!(
+            "- group id: {}",
+            row["group_id"].as_str().unwrap_or("group")
+        );
+        println!(
+            "  shared stable prefix token count: {}",
+            row["shared_stable_prefix_token_count"]
+        );
+        println!("  per-request fresh suffix tokens:");
+        if let Some(items) = row["per_request_fresh_suffix_tokens"].as_array() {
+            for item in items {
+                println!(
+                    "    - {}: {}",
+                    item["task"].as_str().unwrap_or("task"),
+                    item["fresh_suffix_tokens"]
+                );
+            }
+        }
+        println!(
+            "  cache strategy: {}",
+            row["cache_strategy"].as_str().unwrap_or("")
+        );
+        println!(
+            "  estimated repeated tokens avoided: {}",
+            row["estimated_repeated_tokens_avoided"]
+        );
+    }
+    Ok(())
+}
+
+fn runtime_profile_command(rest: &[String]) -> Result<()> {
+    let action = rest.first().map(String::as_str).unwrap_or("list");
+    let runtimes = ["generic", "llama.cpp", "ollama", "vllm", "sglang"];
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!(runtimes
+                .iter()
+                .map(|runtime| runtime_profile(runtime))
+                .collect::<Vec<_>>()))?
+        );
+        return Ok(());
+    }
+    match action {
+        "list" | "" => {
+            println!("runtime profiles");
+            for runtime in runtimes {
+                let profile = runtime_profile(runtime);
+                println!(
+                    "- {}: recommended_context_budget={} | {}",
+                    profile["runtime"].as_str().unwrap_or(runtime),
+                    profile["recommended_context_budget"],
+                    profile["kernel_warning"].as_str().unwrap_or("")
+                );
+            }
+        }
+        other => {
+            let profile = runtime_profile(other);
+            println!("{}", serde_json::to_string_pretty(&profile)?);
+        }
+    }
+    Ok(())
+}
+
+fn timestamp_like(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("generated at")
+        || lower.contains("timestamp")
+        || lower.contains("updated_at")
+        || lower.contains("created_at")
+        || lower.contains("2026-")
+        || lower.contains("2025-")
+}
+
+fn random_id_like(text: &str) -> bool {
+    text.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-')
+        .any(|token| {
+            token.len() >= 16 && token.chars().filter(|ch| ch.is_ascii_hexdigit()).count() >= 12
+        })
+}
+
+fn cache_audit_text(provider: &str, text: &str) -> Value {
+    let provider = normalize_provider(provider);
+    let lower = text.to_ascii_lowercase();
+    let stable_index = lower
+        .find("stable prefix")
+        .or_else(|| lower.find("cacheable"))
+        .unwrap_or(usize::MAX);
+    let fresh_index = lower
+        .find("fresh suffix")
+        .or_else(|| lower.find("dynamic"))
+        .or_else(|| lower.find("current request"))
+        .unwrap_or(usize::MAX);
+    let tool_index = lower
+        .find("tool output")
+        .or_else(|| lower.find("latest tool"))
+        .unwrap_or(usize::MAX);
+    let mut problems = Vec::new();
+    let mut fixes = Vec::new();
+    if fresh_index < stable_index {
+        problems.push("dynamic text appears before stable/cacheable prefix".to_string());
+        fixes.push("move stable repo memory and rules before fresh request text".to_string());
+    }
+    if tool_index < stable_index {
+        problems.push("changing tool output appears before cacheable blocks".to_string());
+        fixes.push("put tool outputs in the fresh suffix after cacheable content".to_string());
+    }
+    let prefix_text = if stable_index == usize::MAX {
+        text
+    } else {
+        &text[stable_index..]
+    };
+    if timestamp_like(prefix_text) {
+        problems.push("timestamp-like text inside stable prefix".to_string());
+        fixes.push("remove generated timestamps from cacheable prefix blocks".to_string());
+    }
+    if random_id_like(prefix_text) {
+        problems.push("random-id-like text inside stable prefix".to_string());
+        fixes.push("move request/session IDs into the fresh suffix".to_string());
+    }
+    let mut seen = HashSet::new();
+    for line in prefix_text
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.len() > 12)
+    {
+        let key = normalized_dedupe_key(line);
+        if !key.is_empty() && !seen.insert(key) {
+            problems.push("duplicate cacheable block detected".to_string());
+            fixes.push("dedupe repeated memory/rule lines in the stable prefix".to_string());
+            break;
+        }
+    }
+    if provider == "claude" && !lower.contains("breakpoint") {
+        problems.push("Claude cache breakpoint hints missing".to_string());
+        fixes.push(
+            "add explicit cache breakpoint groupings for policy, memory, and tools".to_string(),
+        );
+    }
+    if provider == "gemini" && !(lower.contains("cachedcontent") || lower.contains("ttl")) {
+        problems.push("Gemini cachedContent/TTL grouping missing".to_string());
+        fixes.push(
+            "group app policy, repo memory, and session memory with TTL guidance".to_string(),
+        );
+    }
+    if provider == "openai" && stable_index == usize::MAX {
+        problems.push("OpenAI stable prefix marker not found".to_string());
+        fixes.push(
+            "place stable memory/rules first and keep that prefix byte-for-byte stable".to_string(),
+        );
+    }
+    let risk = match problems.len() {
+        0 => "low",
+        1 | 2 => "medium",
+        _ => "high",
+    };
+    json!({
+        "provider": provider,
+        "cache_hit_risk": risk,
+        "problems": problems,
+        "fixes": fixes,
+        "stable_prefix_hash": stable_hash(prefix_text),
+    })
+}
+
+fn cache_audit_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let text = if let Some(path) = cli_flag_path(rest, "--file") {
+        fs::read_to_string(path)?
+    } else {
+        let task = task_from_rest(rest, "current task");
+        build_ai_context_report(
+            engine,
+            &task,
+            &provider,
+            option_usize(rest, "--budget", 1500),
+            None,
+        )?
+        .stable_prefix
+    };
+    let report = cache_audit_text(&provider, &text);
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+    println!("CACHE AUDIT");
+    println!("Provider: {}", report["provider"].as_str().unwrap_or(""));
+    println!(
+        "Cache hit risk: {}",
+        report["cache_hit_risk"].as_str().unwrap_or("")
+    );
+    println!("Problems:");
+    if let Some(items) = report["problems"].as_array() {
+        if items.is_empty() {
+            println!("- none detected");
+        }
+        for item in items {
+            println!("- {}", item.as_str().unwrap_or(""));
+        }
+    }
+    println!("Fixes:");
+    if let Some(items) = report["fixes"].as_array() {
+        if items.is_empty() {
+            println!("- keep the stable prefix unchanged and put fresh request data last");
+        }
+        for item in items {
+            println!("- {}", item.as_str().unwrap_or(""));
+        }
+    }
+    println!(
+        "Stable prefix hash: {}",
+        report["stable_prefix_hash"].as_str().unwrap_or("")
+    );
+    Ok(())
+}
+
+fn trace_rollup_command(rest: &[String]) -> Result<()> {
+    let text = if cli_flag(rest, "--stdin") {
+        let mut input = String::new();
+        io::stdin().read_to_string(&mut input)?;
+        input
+    } else {
+        let path = cli_flag_path(rest, "--from")
+            .or_else(|| cli_flag_path(rest, "--file"))
+            .ok_or_else(|| {
+                anyhow!("usage: memory trace-rollup --from agent-log.json --every 50")
+            })?;
+        fs::read_to_string(path)?
+    };
+    let every = option_usize(rest, "--every", 50);
+    let rollup = rollup_trace_text(&text, every);
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&rollup)?);
+    } else {
+        println!("TRACE ROLLUP");
+        for (label, key) in [
+            ("Decisions made", "decisions_made"),
+            ("Failed attempts", "failed_attempts"),
+            ("Current state", "current_state"),
+            ("Remaining TODO", "remaining_todo"),
+            ("Known bad paths", "known_bad_paths"),
+            ("Current error", "current_error"),
+            ("Next action", "next_action"),
+        ] {
+            println!("{label}:");
+            if let Some(items) = rollup[key].as_array() {
+                for item in items {
+                    println!("- {}", item.as_str().unwrap_or(""));
+                }
+            } else {
+                println!("- {}", rollup[key].as_str().unwrap_or("none detected"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn rollup_trace_text(text: &str, every: usize) -> Value {
+    let summary = compress_trace_text(text);
+    let mut decisions = Vec::new();
+    let mut todos = Vec::new();
+    let mut bad_paths = Vec::new();
+    let mut current_error = "none detected".to_string();
+    for line in text.lines().map(redact_line) {
+        let lower = line.to_ascii_lowercase();
+        if lower.contains("decision") || lower.contains("decided") {
+            decisions.push(line.trim().to_string());
+        }
+        if lower.contains("todo") || lower.contains("remaining") {
+            todos.push(line.trim().to_string());
+        }
+        if lower.contains("do not")
+            || lower.contains("bad path")
+            || lower.contains("failed attempt")
+        {
+            bad_paths.push(line.trim().to_string());
+        }
+        if lower.contains("error") || lower.contains("failed") || lower.contains("panic") {
+            current_error = line.trim().to_string();
+        }
+    }
+    json!({
+        "rollup_every": every,
+        "decisions_made": if decisions.is_empty() { vec!["none detected".to_string()] } else { decisions.into_iter().take(12).collect::<Vec<_>>() },
+        "failed_attempts": summary.lines().filter(|line| line.trim_start().starts_with("- error") || line.to_ascii_lowercase().contains("failed")).take(12).map(|line| line.trim().trim_start_matches("- ").to_string()).collect::<Vec<_>>(),
+        "current_state": "older tool calls compressed into trace rollup",
+        "remaining_todo": if todos.is_empty() { vec!["rerun the smallest failing command".to_string()] } else { todos.into_iter().take(12).collect::<Vec<_>>() },
+        "known_bad_paths": if bad_paths.is_empty() { vec!["none detected".to_string()] } else { bad_paths.into_iter().take(12).collect::<Vec<_>>() },
+        "current_error": current_error,
+        "next_action": "rerun the focused command after applying the remembered fix",
+        "token_original": estimate_tokens(text),
+        "token_rollup": estimate_tokens(&summary),
+    })
+}
+
+fn ai_doctor_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let report = build_ai_context_report(engine, &task, &provider, budget, None)?;
+    record_savings_report(engine, &report)?;
+    if cli_flag(rest, "--json") {
+        let mut value = report.to_json();
+        value["inference_cost_stack"] = inference_cost_stack_json(&report, "generic");
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
+    }
+    println!("AI CONTEXT HEALTH REPORT\n");
+    println!("Task: {}", report.task);
+    println!("Raw context available: {} tokens", report.raw_tokens);
+    println!("Compiled context: {} tokens", report.compiled_tokens);
+    println!(
+        "Cacheable prefix: {} tokens",
+        report.cacheable_prefix_tokens
+    );
+    println!("Fresh suffix: {} tokens", report.fresh_suffix_tokens);
+    println!("Omitted: {} tokens", report.omitted_tokens);
+    println!(
+        "Duplicate blocked: {} tokens",
+        report.duplicate_blocked_tokens
+    );
+    println!("Stale blocked: {} tokens", report.stale_blocked_tokens);
+    println!(
+        "Tool/history bloat blocked: {} tokens",
+        report.tool_bloat_blocked_tokens
+    );
+    println!("Secret-like strings blocked: {}", report.secret_like_blocks);
+    println!(
+        "Estimated KV pressure avoided: {} token positions",
+        report.kv_positions_avoided()
+    );
+    println!(
+        "Estimated context reduction: {:.1}%\n",
+        report.reduction_percent()
+    );
+    println!("Provider plan:");
+    for line in report.cache_plan.lines() {
+        if line.trim_start().starts_with('-') {
+            println!("{line}");
+        } else {
+            println!("- {line}");
+        }
+    }
+    println!("- Stale memories excluded.");
+    println!("- Prior failures and hard rules included when present.");
+    println!("- Runtime KV compression can still be used separately.");
+    println!(
+        "\nRecommended next action: memory compile \"{}\" --provider {} --budget {}",
+        report.task, report.provider, report.budget
+    );
+    print_inference_cost_stack(&report, "generic");
+    Ok(())
+}
+
+fn savings_path(engine: &MemoryEngine) -> PathBuf {
+    engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("savings.jsonl")
+}
+
+fn record_savings_report(engine: &MemoryEngine, report: &AiContextReport) -> Result<()> {
+    let path = savings_path(engine);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let line = serde_json::to_string(&json!({
+        "created_at": Utc::now(),
+        "task": report.task,
+        "provider": report.provider,
+        "raw_tokens": report.raw_tokens,
+        "tokens_sent": report.compiled_tokens,
+        "tokens_omitted": report.omitted_tokens,
+        "cacheable_tokens": report.cacheable_prefix_tokens,
+        "stale_tokens_blocked": report.stale_blocked_tokens,
+        "duplicate_tokens_blocked": report.duplicate_blocked_tokens,
+        "secret_like_blocks": report.secret_like_blocks,
+    }))?;
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    writeln!(file, "{line}")?;
+    Ok(())
+}
+
+fn add_json_u64(value: &mut Value, key: &str, amount: u64) {
+    let current = value[key].as_u64().unwrap_or(0);
+    value[key] = json!(current.saturating_add(amount));
+}
+
+fn savings_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let path = savings_path(engine);
+    let mut totals = json!({
+        "total_raw_tokens_seen": 0u64,
+        "total_tokens_sent": 0u64,
+        "total_tokens_omitted": 0u64,
+        "total_cacheable_tokens": 0u64,
+        "total_stale_tokens_blocked": 0u64,
+        "total_duplicate_tokens_blocked": 0u64,
+        "total_secret_like_blocks": 0u64,
+        "total_context_packs_generated": 0u64,
+    });
+    if let Ok(raw) = fs::read_to_string(&path) {
+        for line in raw.lines() {
+            if let Ok(value) = serde_json::from_str::<Value>(line) {
+                add_json_u64(
+                    &mut totals,
+                    "total_raw_tokens_seen",
+                    value["raw_tokens"].as_u64().unwrap_or(0),
+                );
+                add_json_u64(
+                    &mut totals,
+                    "total_tokens_sent",
+                    value["tokens_sent"].as_u64().unwrap_or(0),
+                );
+                add_json_u64(
+                    &mut totals,
+                    "total_tokens_omitted",
+                    value["tokens_omitted"].as_u64().unwrap_or(0),
+                );
+                add_json_u64(
+                    &mut totals,
+                    "total_cacheable_tokens",
+                    value["cacheable_tokens"].as_u64().unwrap_or(0),
+                );
+                add_json_u64(
+                    &mut totals,
+                    "total_stale_tokens_blocked",
+                    value["stale_tokens_blocked"].as_u64().unwrap_or(0),
+                );
+                add_json_u64(
+                    &mut totals,
+                    "total_duplicate_tokens_blocked",
+                    value["duplicate_tokens_blocked"].as_u64().unwrap_or(0),
+                );
+                add_json_u64(
+                    &mut totals,
+                    "total_secret_like_blocks",
+                    value["secret_like_blocks"].as_u64().unwrap_or(0),
+                );
+                add_json_u64(&mut totals, "total_context_packs_generated", 1);
+            }
+        }
+    }
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&totals)?);
+    } else {
+        println!("memory.cpp savings");
+        println!("total raw tokens seen: {}", totals["total_raw_tokens_seen"]);
+        println!("total tokens sent: {}", totals["total_tokens_sent"]);
+        println!("total tokens omitted: {}", totals["total_tokens_omitted"]);
+        println!(
+            "total cacheable tokens: {}",
+            totals["total_cacheable_tokens"]
+        );
+        println!(
+            "total stale tokens blocked: {}",
+            totals["total_stale_tokens_blocked"]
+        );
+        println!(
+            "total duplicate tokens blocked: {}",
+            totals["total_duplicate_tokens_blocked"]
+        );
+        println!(
+            "total secret-like blocks: {}",
+            totals["total_secret_like_blocks"]
+        );
+        println!(
+            "context packs generated: {}",
+            totals["total_context_packs_generated"]
+        );
+    }
+    Ok(())
+}
+
+fn latest_savings_summary(engine: &MemoryEngine) -> Result<String> {
+    let raw = fs::read_to_string(savings_path(engine)).unwrap_or_default();
+    let Some(line) = raw.lines().last() else {
+        return Ok("none yet".to_string());
+    };
+    let value: Value = serde_json::from_str(line).unwrap_or_else(|_| json!({}));
+    Ok(format!(
+        "{} omitted from {} raw tokens",
+        value["tokens_omitted"].as_u64().unwrap_or(0),
+        value["raw_tokens"].as_u64().unwrap_or(0)
+    ))
+}
+
+fn trace_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest.first().map(String::as_str).unwrap_or("compress");
+    let text = trace_input_text(rest)?;
+    let summary = compress_trace_text(&text);
+    match action {
+        "learn" => {
+            let scope = current_workspace_name(engine)?.unwrap_or_else(|| "default".to_string());
+            let memory = NewMemory::new(summary.clone())
+                .kind(MemoryKind::Summary.as_str())
+                .scope(scope)
+                .tag("tool_trace_summary")
+                .metadata(json!({
+                    "memory_type": "tool_trace_summary",
+                    "token_original": estimate_tokens(&text),
+                    "token_summary": estimate_tokens(&summary),
+                }))
+                .confidence(if cli_flag(rest, "--approve") {
+                    0.82
+                } else {
+                    0.45
+                });
+            if cli_flag(rest, "--draft") || !cli_flag(rest, "--approve") {
+                let _ = engine.remember_candidate(memory, "trace learn draft")?;
+                println!("queued trace summary candidate");
+            } else {
+                let stored = engine.remember(memory)?;
+                println!("stored trace summary: {}", stored.id);
+            }
+        }
+        "summarize" | "compress" => {
+            if cli_flag(rest, "--json") {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "summary": summary,
+                        "token_original": estimate_tokens(&text),
+                        "token_summary": estimate_tokens(&summary),
+                    }))?
+                );
+            } else {
+                println!("{summary}");
+                println!("token_original: {}", estimate_tokens(&text));
+                println!("token_summary: {}", estimate_tokens(&summary));
+            }
+        }
+        other => return Err(anyhow!("unknown trace action '{other}'")),
+    }
+    Ok(())
+}
+
+fn trace_input_text(rest: &[String]) -> Result<String> {
+    if cli_flag(rest, "--stdin") {
+        let mut input = String::new();
+        io::stdin().read_to_string(&mut input)?;
+        return Ok(input);
+    }
+    let path = cli_flag_path(rest, "--file")
+        .or_else(|| {
+            rest.iter()
+                .skip(1)
+                .find(|item| !item.starts_with("--"))
+                .map(PathBuf::from)
+        })
+        .ok_or_else(|| anyhow!("trace command needs --file <path> or --stdin"))?;
+    Ok(fs::read_to_string(path)?)
+}
+
+fn compress_trace_text(raw: &str) -> String {
+    let redacted = raw.lines().map(redact_line).collect::<Vec<_>>();
+    let mut commands = Vec::new();
+    let mut errors = Vec::new();
+    let mut files = HashSet::new();
+    let mut findings = Vec::new();
+    for line in &redacted {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        if trimmed.starts_with('$')
+            || lower.starts_with("cargo ")
+            || lower.starts_with("npm ")
+            || lower.starts_with("pnpm ")
+            || lower.starts_with("yarn ")
+            || lower.starts_with("git ")
+            || lower.starts_with("memory ")
+        {
+            commands.push(trimmed.to_string());
+        }
+        if lower.contains("error")
+            || lower.contains("failed")
+            || lower.contains("panic")
+            || lower.contains("exception")
+            || lower.contains("timeout")
+        {
+            errors.push(trimmed.to_string());
+        }
+        for token in trimmed.split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ':' | ';')) {
+            if token.contains('.')
+                && [
+                    ".rs", ".ts", ".tsx", ".js", ".py", ".md", ".toml", ".yml", ".json",
+                ]
+                .iter()
+                .any(|suffix| token.ends_with(suffix))
+            {
+                files.insert(token.trim_matches('"').to_string());
+            }
+        }
+        if lower.contains("warning") || lower.contains("note:") || lower.contains("fix") {
+            findings.push(trimmed.to_string());
+        }
+    }
+    let mut out = String::new();
+    out.push_str("tool_trace_summary:\n");
+    out.push_str("  goal: infer from surrounding task or prompt\n");
+    out.push_str("  attempted:\n");
+    push_yaml_items(&mut out, &commands, 10);
+    out.push_str("  failed_attempts:\n");
+    push_yaml_items(&mut out, &errors, 8);
+    out.push_str("  final_error: ");
+    out.push_str(errors.last().map(String::as_str).unwrap_or("none detected"));
+    out.push('\n');
+    out.push_str("  useful_findings:\n");
+    push_yaml_items(&mut out, &findings, 8);
+    out.push_str("  files_touched:\n");
+    push_yaml_items(&mut out, &files.into_iter().collect::<Vec<_>>(), 12);
+    out.push_str("  next_best_action: rerun the smallest failing command after applying the remembered fix\n");
+    out.push_str(&format!("  token_original: {}\n", estimate_tokens(raw)));
+    out.push_str(&format!("  token_summary: {}\n", estimate_tokens(&out)));
+    out
+}
+
+fn push_yaml_items(out: &mut String, items: &[String], limit: usize) {
+    if items.is_empty() {
+        out.push_str("    - none detected\n");
+    } else {
+        for item in items.iter().take(limit) {
+            out.push_str(&format!("    - {}\n", item.replace('\n', " ")));
+        }
+    }
+}
+
+fn mistake_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let rule = task_from_rest(rest, "");
+    if rule.is_empty() {
+        return Err(anyhow!(
+            "usage: memory mistake \"Never repeat this mistake\""
+        ));
+    }
+    let severity = cli_flag_value(rest, "--severity").unwrap_or_else(|| "hard".to_string());
+    let applies_to = cli_flag_value(rest, "--applies-to").unwrap_or_else(|| "repo".to_string());
+    let scope = current_workspace_name(engine)?.unwrap_or_else(|| "default".to_string());
+    let stored = engine.remember(
+        NewMemory::new(format!("Mistake firewall rule: {rule}"))
+            .kind(MemoryKind::Workflow.as_str())
+            .scope(scope)
+            .tag("mistake")
+            .tag("rule")
+            .tag(severity.clone())
+            .metadata(json!({
+                "memory_type": "rule",
+                "mistake_firewall": true,
+                "rule": rule,
+                "severity": severity,
+                "applies_to": applies_to,
+                "cacheability_score": 0.9,
+                "reuse_score": 0.9,
+                "risk_score": if severity == "critical" { 1.0 } else { 0.7 },
+                "token_estimate": estimate_tokens(&rule),
+            }))
+            .confidence(0.95)
+            .human_confirmed(true),
+    )?;
+    println!("mistake rule stored: {}", stored.id);
+    println!("included automatically in relevant context packs.");
+    Ok(())
+}
+
+fn mistakes_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    match rest.first().map(String::as_str).unwrap_or("list") {
+        "remove" => {
+            let id = rest
+                .get(1)
+                .ok_or_else(|| anyhow!("usage: memory mistakes remove <id>"))?;
+            let removed = engine.forget(id, "removed mistake rule")?;
+            println!("removed mistake rule: {}", removed.id);
+        }
+        _ => {
+            let scope = current_workspace_name(engine)?;
+            let mut query = RecallQuery::new("mistake firewall rules never do not")
+                .limit(50)
+                .include_content(true)
+                .tag("mistake");
+            if let Some(scope) = scope {
+                query = query.workspace(scope);
+            }
+            let items = engine.search(query)?;
+            if cli_flag(rest, "--json") {
+                println!("{}", serde_json::to_string_pretty(&items)?);
+            } else {
+                println!("mistake firewall rules");
+                if items.is_empty() {
+                    println!("none yet");
+                    println!("add one: memory mistake \"Use pnpm only. Never npm.\"");
+                }
+                for item in items {
+                    println!("- {} {}", item.memory.id, item.memory.summary);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn conflicts_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let scope = current_workspace_name(engine)?;
+    let conflicts = engine.conflicts(scope.as_deref(), option_usize(rest, "--limit", 20))?;
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&conflicts)?);
+    } else {
+        println!("memory conflicts");
+        if conflicts.is_empty() {
+            println!("none detected");
+        }
+        for conflict in conflicts {
+            println!(
+                "- {} {} -> {} ({})",
+                conflict.id, conflict.old_memory_id, conflict.new_memory_id, conflict.reason
+            );
+        }
+    }
+    Ok(())
+}
+
+fn stale_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let scope = current_workspace_name(engine)?;
+    let mut query = RecallQuery::new("stale superseded deprecated old replaced no longer works")
+        .limit(option_usize(rest, "--limit", 30))
+        .include_content(true)
+        .include_inactive(true);
+    if let Some(scope) = scope {
+        query = query.workspace(scope);
+    }
+    let items = engine.search(query)?;
+    let stale = items
+        .into_iter()
+        .filter(|item| {
+            is_memory_stale_or_blocked(&item.memory)
+                || item.memory.content.to_ascii_lowercase().contains("stale")
+                || item
+                    .memory
+                    .content
+                    .to_ascii_lowercase()
+                    .contains("deprecated")
+        })
+        .collect::<Vec<_>>();
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&stale)?);
+    } else {
+        println!("stale memory candidates");
+        if stale.is_empty() {
+            println!("none detected");
+        }
+        for item in stale {
+            println!("- {} {}", item.memory.id, item.memory.summary);
+        }
+        println!("mark stale: memory resolve <id> --stale");
+    }
+    Ok(())
+}
+
+fn resolve_memory_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let id = rest
+        .first()
+        .filter(|value| !value.starts_with("--"))
+        .ok_or_else(|| anyhow!("usage: memory resolve <memory_id> --stale"))?;
+    let status = if cli_flag(rest, "--stale") || cli_flag(rest, "--superseded-by") {
+        MemoryStatus::Superseded
+    } else {
+        MemoryStatus::Archived
+    };
+    let edited = engine.edit_memory(
+        id,
+        MemoryEdit {
+            status: Some(status),
+            metadata: Some(json!({
+                "resolved_at": Utc::now(),
+                "resolution": if cli_flag(rest, "--stale") { "stale" } else { "superseded" },
+                "superseded_by": cli_flag_value(rest, "--superseded-by"),
+            })),
+            ..MemoryEdit::default()
+        },
+    )?;
+    println!(
+        "resolved memory {} as {}",
+        edited.id,
+        edited.attributes.status.as_str()
+    );
+    Ok(())
+}
+
+fn clean_stale_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let apply = cli_flag(rest, "--apply");
+    let scope = current_workspace_name(engine)?;
+    let mut query = RecallQuery::new("stale superseded deprecated old replaced")
+        .limit(50)
+        .include_content(true)
+        .include_inactive(true);
+    if let Some(scope) = scope {
+        query = query.workspace(scope);
+    }
+    let items = engine.search(query)?;
+    let mut count = 0usize;
+    for item in items {
+        if item.memory.content.to_ascii_lowercase().contains("stale")
+            || is_memory_stale_or_blocked(&item.memory)
+        {
+            count += 1;
+            if apply {
+                let _ = engine.edit_memory(
+                    &item.memory.id,
+                    MemoryEdit {
+                        status: Some(MemoryStatus::Superseded),
+                        ..MemoryEdit::default()
+                    },
+                )?;
+            }
+            println!("- {} {}", item.memory.id, item.memory.summary);
+        }
+    }
+    if apply {
+        println!("marked {count} stale memory item(s) as superseded");
+    } else {
+        println!("dry run: {count} stale memory item(s) would be marked superseded");
+        println!("apply with: memory clean stale --apply");
+    }
+    Ok(())
+}
+
+fn runtime_plan_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let runtime = cli_flag_value(rest, "--runtime").unwrap_or_else(|| "generic".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let report = build_ai_context_report(engine, &task, "generic", budget, None)?;
+    let profile = runtime_profile(&runtime);
+    let plan = json!({
+        "runtime": profile["runtime"],
+        "recommended_context_budget": profile["recommended_context_budget"],
+        "context_budget": budget.min(profile["recommended_context_budget"].as_u64().unwrap_or(budget as u64) as usize),
+        "compiled_prompt": report.compiled_prompt,
+        "prefix_reuse_hint": profile["prefix_reuse_hint"],
+        "kv_pressure_estimate": kv_json(&report),
+        "kv_quantization_hint": profile["kv_quantization_hint"],
+        "speculative_decoding_hint": profile["speculative_decoding_hint"],
+        "batching_hint": profile["batching_hint"],
+        "dynamic_suffix_placement": profile["dynamic_suffix_placement"],
+        "kernel_warning": profile["kernel_warning"],
+    });
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&plan)?);
+    } else {
+        println!(
+            "runtime plan for {}",
+            profile["runtime"].as_str().unwrap_or("generic")
+        );
+        println!("task: {task}");
+        println!(
+            "recommended context budget: {}",
+            plan["recommended_context_budget"]
+        );
+        println!("context budget: {}", plan["context_budget"]);
+        println!(
+            "prefix reuse: {}",
+            plan["prefix_reuse_hint"].as_str().unwrap_or("")
+        );
+        println!(
+            "kv quantization: {}",
+            plan["kv_quantization_hint"].as_str().unwrap_or("")
+        );
+        println!(
+            "speculative decoding: {}",
+            plan["speculative_decoding_hint"].as_str().unwrap_or("")
+        );
+        println!("batching: {}", plan["batching_hint"].as_str().unwrap_or(""));
+        println!(
+            "dynamic suffix placement: {}",
+            plan["dynamic_suffix_placement"].as_str().unwrap_or("")
+        );
+        println!("warning: {}", plan["kernel_warning"].as_str().unwrap_or(""));
+        println!(
+            "estimated KV positions avoided: {}",
+            report.kv_positions_avoided()
+        );
+    }
+    Ok(())
+}
+
+fn bench_context_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let started = SystemTime::now();
+    let scenarios = [
+        ("duplicate docs removal", "duplicate architecture docs"),
+        ("stale memory removal", "deprecated command replaced"),
+        ("tool trace compression", "long terminal log with error"),
+        ("provider cache split", "stable prefix dynamic suffix"),
+        ("KV pressure reduction", "long prompt compact pack"),
+        ("repo task context pack", "fix checkout bug"),
+        ("user/app memory pack", "remember user preference"),
+        ("mixed app + repo + trace memory", "debug release failure"),
+    ];
+    let mut rows = Vec::new();
+    for (label, task) in scenarios {
+        let report = build_ai_context_report(engine, task, "generic", 1200, None)?;
+        rows.push(json!({
+            "scenario": label,
+            "raw_tokens": report.raw_tokens,
+            "compiled_tokens": report.compiled_tokens,
+            "omitted_tokens": report.omitted_tokens,
+            "reduction_percent": format!("{:.1}", report.reduction_percent()),
+            "warnings_count": report.prompt_injection_warnings + report.secret_like_blocks,
+            "pass": report.compiled_tokens <= report.raw_tokens.max(report.compiled_tokens),
+        }));
+    }
+    let elapsed_ms = started.elapsed().unwrap_or_default().as_millis();
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({"elapsed_ms": elapsed_ms, "scenarios": rows}))?
+        );
+    } else {
+        println!("memory.cpp context benchmark");
+        println!("elapsed_ms: {elapsed_ms}");
+        for row in rows {
+            println!(
+                "- {}: raw={} compiled={} omitted={} reduction={}%, warnings={} pass={}",
+                row["scenario"].as_str().unwrap_or("scenario"),
+                row["raw_tokens"],
+                row["compiled_tokens"],
+                row["omitted_tokens"],
+                row["reduction_percent"].as_str().unwrap_or("0.0"),
+                row["warnings_count"],
+                row["pass"]
+            );
+        }
+    }
+    Ok(())
+}
+
+fn memory_brief(memory: &memory_core::StoredMemory) -> Value {
+    json!({
+        "id": memory.id,
+        "scope": memory.scope,
+        "type": memory.kind.as_str(),
+        "status": memory.attributes.status.as_str(),
+        "text": memory.content,
+        "summary": memory.summary,
+        "created_at": memory.created_at,
+        "updated_at": memory.updated_at,
+        "confidence": memory.attributes.confidence,
+        "privacy_level": format!("{:?}", memory.attributes.permission).to_ascii_lowercase(),
+        "token_estimate": estimate_tokens(&memory.content),
+        "reuse_count": memory.access_count,
+        "last_used_at": memory.last_accessed_at,
+        "cacheability_score": memory.derived.durability,
+        "risk_score": memory.derived.sensitivity,
+        "source_authority": memory.derived.source_reliability,
+        "tags": memory.attributes.tags,
+        "evidence": memory.attributes.source,
+        "metadata": memory.metadata,
+    })
+}
+
+fn find_memory(engine: &MemoryEngine, id_or_prefix: &str) -> Result<memory_core::StoredMemory> {
+    engine
+        .all_memories(None, true)?
+        .into_iter()
+        .find(|memory| memory.id == id_or_prefix || memory.id.starts_with(id_or_prefix))
+        .ok_or_else(|| anyhow!("memory not found: {id_or_prefix}"))
+}
+
+fn memories_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest.first().map(String::as_str).unwrap_or("list");
+    let scope = cli_flag_value(rest, "--scope").or_else(|| cli_flag_value(rest, "--workspace"));
+    let limit = option_usize(rest, "--limit", 50);
+    match action {
+        "list" => {
+            let memories = engine.list_recent(scope.as_deref(), limit)?;
+            if cli_flag(rest, "--json") {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &memories.iter().map(memory_brief).collect::<Vec<_>>()
+                    )?
+                );
+            } else {
+                println!("memories");
+                if memories.is_empty() {
+                    println!("not found: no memories yet");
+                }
+                for memory in memories {
+                    println!(
+                        "- {} [{}:{}:{}] {}",
+                        memory.id,
+                        memory.scope,
+                        memory.kind,
+                        memory.attributes.status.as_str(),
+                        memory.summary
+                    );
+                }
+            }
+        }
+        "show" => {
+            let id = first_positional_after_action(rest)
+                .ok_or_else(|| anyhow!("usage: memory memories show <memory_id>"))?;
+            let memory = find_memory(engine, id)?;
+            if cli_flag(rest, "--json") {
+                println!("{}", serde_json::to_string_pretty(&memory_brief(&memory))?);
+            } else {
+                println!("memory {}", memory.id);
+                println!("scope: {}", memory.scope);
+                println!("type: {}", memory.kind);
+                println!("status: {}", memory.attributes.status.as_str());
+                println!("confidence: {:.2}", memory.attributes.confidence);
+                println!("tokens: {}", estimate_tokens(&memory.content));
+                println!(
+                    "evidence: {}",
+                    memory
+                        .attributes
+                        .source
+                        .as_ref()
+                        .map(|source| format!("{source:?}"))
+                        .unwrap_or_else(|| "none".to_string())
+                );
+                println!("\n{}", memory.content);
+            }
+        }
+        "export" => {
+            let format = cli_flag_value(rest, "--format").unwrap_or_else(|| "json".to_string());
+            if format != "json" {
+                return Err(anyhow!("memory memories export currently supports --format json"));
+            }
+            let memories = engine.all_memories(scope.as_deref(), true)?;
+            let body = serde_json::to_string_pretty(
+                &memories.iter().map(memory_brief).collect::<Vec<_>>(),
+            )?;
+            if let Some(path) = cli_flag_path(rest, "--output").or_else(|| cli_flag_path(rest, "--file")) {
+                write_public_artifact(&path, &body, true)?;
+                println!("exported memories: {}", path.display());
+            } else {
+                println!("{body}");
+            }
+        }
+        "import" => {
+            let file = cli_flag_path(rest, "--file")
+                .ok_or_else(|| anyhow!("usage: memory memories import --file memories.json"))?;
+            let raw = fs::read_to_string(&file)?;
+            let values = serde_json::from_str::<Value>(&raw)?;
+            let items = values
+                .as_array()
+                .ok_or_else(|| anyhow!("memories import expects a JSON array"))?;
+            let mut imported = 0usize;
+            for item in items {
+                let text = item
+                    .get("text")
+                    .or_else(|| item.get("content"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
+                if text.is_empty() {
+                    continue;
+                }
+                let scope = item
+                    .get("scope")
+                    .and_then(Value::as_str)
+                    .unwrap_or("imported");
+                let kind = item.get("type").and_then(Value::as_str).unwrap_or("note");
+                engine.remember(
+                    NewMemory::new(text)
+                        .scope(scope)
+                        .kind(kind)
+                        .metadata(json!({"imported_from": file, "original": item})),
+                )?;
+                imported += 1;
+            }
+            println!("imported {imported} memories from {}", file.display());
+        }
+        _ => {
+            println!("memory memories commands: list, show <id>, export --format json, import --file memories.json");
+        }
+    }
+    Ok(())
+}
+
+fn profile_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest.first().map(String::as_str).unwrap_or("show");
+    let scope = cli_flag_value(rest, "--scope").unwrap_or_else(|| "user".to_string());
+    match action {
+        "show" => {
+            let memories = engine.all_memories(Some(&scope), true)?;
+            println!("profile scope: {scope}");
+            if memories.is_empty() {
+                println!("not found: no profile memories for this scope");
+            }
+            for memory in memories.iter().take(20) {
+                println!(
+                    "- [{}:{}] {}",
+                    memory.kind,
+                    memory.attributes.status.as_str(),
+                    memory.summary
+                );
+            }
+        }
+        "build" => {
+            let file = cli_flag_path(rest, "--from")
+                .ok_or_else(|| anyhow!("usage: memory profile build --from transcript.txt"))?;
+            let raw = fs::read_to_string(&file)?;
+            let summary = raw
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .take(8)
+                .collect::<Vec<_>>()
+                .join(" ");
+            let text = format!("Profile summary from {}: {}", file.display(), summary);
+            if cli_flag(rest, "--dry-run") {
+                println!("{text}");
+            } else {
+                let stored = engine.remember(
+                    NewMemory::new(text)
+                        .scope(scope)
+                        .kind("profile")
+                        .tag("profile")
+                        .metadata(json!({"source_file": file})),
+                )?;
+                println!("profile memory stored: {}", stored.id);
+            }
+        }
+        "update" => {
+            let fact = task_from_rest(&rest[1..], "profile fact");
+            let stored = engine.remember(
+                NewMemory::new(fact)
+                    .scope(scope)
+                    .kind("preference")
+                    .tag("profile"),
+            )?;
+            println!("profile updated: {}", stored.id);
+        }
+        _ => println!("profile commands: show, build --from transcript.txt, update \"<fact>\""),
+    }
+    Ok(())
+}
+
+fn explain_compile_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let report = build_ai_context_report(engine, &task, &provider, budget, None)?;
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&report.to_json())?);
+        return Ok(());
+    }
+    println!("EXPLAIN COMPILE");
+    println!("task: {}", report.task);
+    println!("provider: {}", report.provider);
+    println!("budget: {}", report.budget);
+    println!("included memories:");
+    for item in &report.evidence {
+        println!(
+            "- {} [{}] score={} tokens={} reason={}",
+            item["id"].as_str().unwrap_or("unknown"),
+            item["kind"].as_str().unwrap_or("memory"),
+            item["score"],
+            estimate_tokens(item["summary"].as_str().unwrap_or("")),
+            item["reason"].as_str().unwrap_or("ranked as relevant")
+        );
+    }
+    println!("excluded duplicate tokens: {}", report.duplicate_blocked_tokens);
+    println!("excluded stale tokens: {}", report.stale_blocked_tokens);
+    println!("omitted tokens: {}", report.omitted_tokens);
+    println!("expected usefulness: {:.2}", report.signal_density_score());
+    Ok(())
+}
+
+fn roi_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let mut totals = json!({
+        "context_packs_generated": 0u64,
+        "raw_tokens_avoided": 0u64,
+        "compiled_tokens_sent": 0u64,
+        "cacheable_tokens_prepared": 0u64,
+        "duplicate_tokens_blocked": 0u64,
+        "stale_tokens_blocked": 0u64,
+        "approximate_cost_avoided": 0.0,
+        "mistake_firewall_hits": 0u64,
+        "prior_fixes_reused": 0u64,
+    });
+    let input_cost = cli_flag_value(rest, "--input-cost")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    if let Ok(raw) = fs::read_to_string(savings_path(engine)) {
+        for line in raw.lines() {
+            if let Ok(value) = serde_json::from_str::<Value>(line) {
+                add_json_u64(&mut totals, "context_packs_generated", 1);
+                add_json_u64(&mut totals, "raw_tokens_avoided", value["tokens_omitted"].as_u64().unwrap_or(0));
+                add_json_u64(&mut totals, "compiled_tokens_sent", value["tokens_sent"].as_u64().unwrap_or(0));
+                add_json_u64(&mut totals, "cacheable_tokens_prepared", value["cacheable_tokens"].as_u64().unwrap_or(0));
+                add_json_u64(&mut totals, "duplicate_tokens_blocked", value["duplicate_tokens_blocked"].as_u64().unwrap_or(0));
+                add_json_u64(&mut totals, "stale_tokens_blocked", value["stale_tokens_blocked"].as_u64().unwrap_or(0));
+            }
+        }
+    }
+    let avoided = totals["raw_tokens_avoided"].as_u64().unwrap_or(0) as f64;
+    totals["approximate_cost_avoided"] = json!((avoided / 1_000_000.0) * input_cost);
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&totals)?);
+    } else {
+        println!("memory.cpp ROI estimate");
+        println!("context packs generated: {}", totals["context_packs_generated"]);
+        println!("raw tokens avoided: {}", totals["raw_tokens_avoided"]);
+        println!("compiled tokens sent: {}", totals["compiled_tokens_sent"]);
+        println!("cacheable tokens prepared: {}", totals["cacheable_tokens_prepared"]);
+        println!("duplicate tokens blocked: {}", totals["duplicate_tokens_blocked"]);
+        println!("stale tokens blocked: {}", totals["stale_tokens_blocked"]);
+        println!("approximate cost avoided: {}", totals["approximate_cost_avoided"]);
+        println!("note: cost calculations are approximate unless real billing data is supplied.");
+    }
+    Ok(())
+}
+
+fn leaderboard_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let memories = engine.all_memories(None, true)?;
+    let mut reused = memories.clone();
+    reused.sort_by_key(|memory| std::cmp::Reverse(memory.access_count));
+    let stale = memories
+        .iter()
+        .filter(|memory| {
+            matches!(
+                memory.attributes.status,
+                MemoryStatus::Superseded | MemoryStatus::Contradicted | MemoryStatus::Forgotten
+            )
+        })
+        .take(10)
+        .collect::<Vec<_>>();
+    let mistakes = memories
+        .iter()
+        .filter(|memory| memory.content.to_ascii_lowercase().contains("mistake firewall"))
+        .take(10)
+        .collect::<Vec<_>>();
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "top_reused_memories": reused.iter().take(10).map(memory_brief).collect::<Vec<_>>(),
+                "top_blocked_stale_memories": stale.iter().map(|memory| memory_brief(memory)).collect::<Vec<_>>(),
+                "top_mistake_firewall_hits": mistakes.iter().map(|memory| memory_brief(memory)).collect::<Vec<_>>(),
+                "top_token_waste_sources": ["duplicate context", "stale memory", "tool traces", "low relevance"]
+            }))?
+        );
+        return Ok(());
+    }
+    println!("memory.cpp leaderboard");
+    println!("top token waste sources:");
+    println!("- duplicate context");
+    println!("- stale memory");
+    println!("- tool/result/history bloat");
+    println!("top reused memories:");
+    for memory in reused.into_iter().take(10) {
+        println!("- {} uses={} {}", memory.id, memory.access_count, memory.summary);
+    }
+    println!("top blocked stale memories:");
+    for memory in stale {
+        println!("- {} {}", memory.id, memory.summary);
+    }
+    println!("top mistake firewall hits:");
+    for memory in mistakes {
+        println!("- {} {}", memory.id, memory.summary);
+    }
+    Ok(())
+}
+
+fn cache_hash_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let text = if let Some(path) = cli_flag_path(rest, "--file") {
+        fs::read_to_string(path)?
+    } else {
+        let task = task_from_rest(rest, "current task");
+        build_ai_context_report(engine, &task, "generic", 1500, None)?.stable_prefix
+    };
+    println!("stable_prefix_hash: {}", stable_hash(&text));
+    println!("tokens: {}", estimate_tokens(&text));
+    Ok(())
+}
+
+fn cache_stability_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let audit = if let Some(path) = cli_flag_path(rest, "--file") {
+        cache_audit_text(&provider, &fs::read_to_string(path)?)
+    } else {
+        let task = task_from_rest(rest, "current task");
+        let report = build_ai_context_report(engine, &task, &provider, 1500, None)?;
+        cache_audit_text(&provider, &report.stable_prefix)
+    };
+    println!("cache stability");
+    println!("provider: {}", audit["provider"].as_str().unwrap_or(""));
+    println!("risk: {}", audit["cache_hit_risk"].as_str().unwrap_or(""));
+    println!(
+        "stable prefix hash: {}",
+        audit["stable_prefix_hash"].as_str().unwrap_or("")
+    );
+    Ok(())
+}
+
+fn trust_report_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let memories = engine.all_memories(None, true)?;
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut without_evidence = 0usize;
+    let mut high_risk_sources = Vec::new();
+    for memory in &memories {
+        *counts.entry(memory.attributes.status.as_str().to_string()).or_default() += 1;
+        if memory.attributes.source.is_none() {
+            without_evidence += 1;
+        }
+        let lower = memory.content.to_ascii_lowercase();
+        if lower.contains("ignore previous instructions")
+            || lower.contains("reveal secrets")
+            || lower.contains("exfiltrate")
+        {
+            high_risk_sources.push(memory.summary.clone());
+        }
+    }
+    let report = json!({
+        "active_memories": counts.get("active").copied().unwrap_or(0),
+        "draft_memories": engine.inbox(None, Some("pending")).unwrap_or_default().len(),
+        "stale_memories": counts.get("superseded").copied().unwrap_or(0),
+        "superseded_memories": counts.get("superseded").copied().unwrap_or(0),
+        "quarantined_memories": counts.get("pending_review").copied().unwrap_or(0),
+        "low_confidence_memories": memories.iter().filter(|memory| memory.attributes.confidence < 0.5).count(),
+        "memories_without_evidence": without_evidence,
+        "high_risk_sources": high_risk_sources,
+        "recommended_fixes": ["memory quarantine review", "memory evidence <memory_id>", "memory clean stale --dry-run"]
+    });
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("memory trust report");
+        for key in [
+            "active_memories",
+            "draft_memories",
+            "stale_memories",
+            "superseded_memories",
+            "quarantined_memories",
+            "low_confidence_memories",
+            "memories_without_evidence",
+        ] {
+            println!("{key}: {}", report[key]);
+        }
+        println!("recommended fixes:");
+        println!("- memory quarantine review");
+        println!("- memory evidence <memory_id>");
+        println!("- memory clean stale --dry-run");
+    }
+    Ok(())
+}
+
+fn redactions_command(rest: &[String]) -> Result<()> {
+    let sample = cli_flag_value(rest, "--sample").unwrap_or_else(|| {
+        "authorization=Bearer demo-secret-value password=demo-secret-value email=test@example.com"
+            .to_string()
+    });
+    println!("redaction patterns");
+    println!("- password, token, secret, authorization, cookie, apiKey, email");
+    println!("preview:");
+    println!("{}", redact_line(sample));
+    Ok(())
+}
+
+fn evidence_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let id = rest.first().ok_or_else(|| anyhow!("usage: memory evidence <memory_id>"))?;
+    let memory = find_memory(engine, id)?;
+    println!("evidence for {}", memory.id);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "source": memory.attributes.source,
+            "metadata": memory.metadata,
+            "created_at": memory.created_at,
+            "confidence": memory.attributes.confidence,
+            "source_authority": memory.derived.source_reliability,
+        }))?
+    );
+    Ok(())
+}
+
+fn suspicious_memory(memory: &memory_core::StoredMemory) -> bool {
+    let lower = memory.content.to_ascii_lowercase();
+    [
+        "ignore previous instructions",
+        "reveal secrets",
+        "exfiltrate",
+        "disable safety",
+        "run destructive commands",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+        || matches!(memory.attributes.status, MemoryStatus::PendingReview)
+}
+
+fn quarantine_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest.first().map(String::as_str).unwrap_or("list");
+    match action {
+        "list" | "review" => {
+            println!("quarantine {action}");
+            for memory in engine.all_memories(None, true)?.into_iter().filter(suspicious_memory) {
+                println!(
+                    "- {} [{}] {}",
+                    memory.id,
+                    memory.attributes.status.as_str(),
+                    memory.summary
+                );
+            }
+        }
+        "approve" => {
+            let id = first_positional_after_action(rest)
+                .ok_or_else(|| anyhow!("usage: memory quarantine approve <id>"))?;
+            engine.edit_memory(
+                id,
+                MemoryEdit {
+                    status: Some(MemoryStatus::Active),
+                    ..MemoryEdit::default()
+                },
+            )?;
+            println!("approved quarantined memory {id}");
+        }
+        "reject" => {
+            let id = first_positional_after_action(rest)
+                .ok_or_else(|| anyhow!("usage: memory quarantine reject <id>"))?;
+            engine.edit_memory(
+                id,
+                MemoryEdit {
+                    status: Some(MemoryStatus::Forgotten),
+                    ..MemoryEdit::default()
+                },
+            )?;
+            println!("rejected quarantined memory {id}");
+        }
+        _ => println!("quarantine commands: list, review, approve <id>, reject <id>"),
+    }
+    Ok(())
+}
+
+fn review_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest.first().map(String::as_str).unwrap_or("list");
+    match action {
+        "approve" | "--approve" => {
+            let id = first_positional_after_action(rest)
+                .or_else(|| rest.get(1).map(String::as_str))
+                .ok_or_else(|| anyhow!("usage: memory review --approve <id>"))?;
+            approve_inbox_item(engine, id, false)?;
+            println!("approved review candidate {id}");
+        }
+        "reject" | "--reject" => {
+            let id = first_positional_after_action(rest)
+                .or_else(|| rest.get(1).map(String::as_str))
+                .ok_or_else(|| anyhow!("usage: memory review --reject <id>"))?;
+            engine.review_inbox(id, "rejected")?;
+            println!("rejected review candidate {id}");
+        }
+        "--approve-all-safe" | "approve-all-safe" => {
+            let mut approved = 0usize;
+            for item in engine.inbox(None, Some("pending"))? {
+                if candidate_confidence(&item) >= 0.9 && candidate_sensitivity(&item) == "low" {
+                    if approve_inbox_item(engine, &item.id, true)?.is_some() {
+                        approved += 1;
+                    }
+                }
+            }
+            println!("approved {approved} safe candidate(s)");
+        }
+        _ => {
+            println!("memory review");
+            for item in engine.inbox(None, Some("pending"))?.into_iter().take(20) {
+                println!(
+                    "- {} confidence={:.2} risk={} {}",
+                    item.id,
+                    candidate_confidence(&item),
+                    candidate_sensitivity(&item),
+                    item.content
+                );
+            }
+            println!("actions: memory review --approve <id> | memory review --reject <id>");
+        }
+    }
+    Ok(())
+}
+
 fn share_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
     let action = rest
         .first()
@@ -13997,7 +17060,16 @@ fn parse_metadata(value: Option<&str>) -> Result<Value> {
 }
 
 fn parse_kind(value: &str) -> std::result::Result<MemoryKind, String> {
-    MemoryKind::from_str(value).map_err(|err| err.to_string())
+    let normalized = match value.trim().to_ascii_lowercase().as_str() {
+        "profile" | "relationship" => "persona",
+        "failure" | "warning" | "contradiction" => "bug",
+        "fix" | "rule" | "mistake" | "workflow_rule" => "workflow",
+        "document_summary" | "file_summary" | "conversation_summary" | "tool_trace_summary"
+        | "agent_trace_summary" | "project_state" | "task_state" | "provider_pack"
+        | "benchmark_result" | "cacheable_prefix" | "stale" | "superseded" => "summary",
+        other => other,
+    };
+    MemoryKind::from_str(normalized).map_err(|err| err.to_string())
 }
 
 fn parse_permission(value: &str) -> Result<MemoryPermission> {
@@ -14967,6 +18039,29 @@ mod tests {
             "handoff",
             "adoption",
             "release-check",
+            "compile",
+            "pack",
+            "token-firewall",
+            "firewall",
+            "cache-plan",
+            "kv-report",
+            "prefill-report",
+            "kv-budget",
+            "signal-density",
+            "batch-plan",
+            "runtime-profile",
+            "cache-audit",
+            "kv-compile",
+            "trace",
+            "trace-rollup",
+            "mistake",
+            "mistakes",
+            "conflicts",
+            "stale",
+            "resolve",
+            "savings",
+            "runtime-plan",
+            "bench-context",
             "show-map",
             "show-brain",
             "show-timeline",
@@ -15603,6 +18698,180 @@ mod tests {
     }
 
     #[test]
+    fn token_optimization_helpers_are_local_and_bounded() {
+        assert_eq!(estimate_tokens(""), 0);
+        assert_eq!(estimate_tokens("abcd"), 1);
+        assert_eq!(
+            task_from_rest(
+                &[
+                    "fix checkout bug".to_string(),
+                    "--provider".to_string(),
+                    "openai".to_string(),
+                    "--budget".to_string(),
+                    "1500".to_string(),
+                ],
+                "default"
+            ),
+            "fix checkout bug"
+        );
+        let plan = provider_cache_plan("claude", 900, 120);
+        assert!(plan.contains("cache"));
+        assert!(plan.contains("fresh_suffix"));
+    }
+
+    #[test]
+    fn trace_compression_redacts_and_extracts_signal() {
+        let summary = compress_trace_text(
+            "$ cargo test\nerror: failed in crates/foo/src/lib.rs\nAPI_KEY=demo-secret-value\nfix: rerun focused test",
+        );
+        assert!(summary.contains("tool_trace_summary"));
+        assert!(summary.contains("cargo test"));
+        assert!(!summary.contains("demo-secret-value"));
+        assert!(summary.contains("crates/foo/src/lib.rs"));
+    }
+
+    #[test]
+    fn provider_pack_block_can_be_updated_in_place() {
+        let first = "intro\n\n<!-- memory.cpp:start -->\nold\n<!-- memory.cpp:end -->\nfooter";
+        let block = "<!-- memory.cpp:start -->\nnew\n<!-- memory.cpp:end -->\n";
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let temp = env::temp_dir().join(format!("memory-cpp-pack-test-{unique}"));
+        fs::create_dir_all(&temp).expect("create temp");
+        let path = temp.join("AGENTS.md");
+        fs::write(&path, first).expect("write fixture");
+        upsert_memory_block(&path, block).expect("upsert");
+        let updated = fs::read_to_string(&path).expect("read updated");
+        assert!(updated.contains("intro"));
+        assert!(updated.contains("new"));
+        assert!(updated.contains("footer"));
+        assert!(!updated.contains("old"));
+        fs::remove_dir_all(temp).expect("cleanup temp");
+    }
+
+    #[test]
+    fn inference_report_excludes_stale_and_reduces_tokens() -> Result<()> {
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_nanos();
+        let dir = env::temp_dir().join(format!("memory-cpp-inference-test-{unique}"));
+        fs::create_dir_all(&dir)?;
+        let engine = MemoryEngine::open_default(dir.join("memory.db"))?;
+        engine.create_workspace("default", "test workspace", "project", true)?;
+        engine.remember(
+            NewMemory::new("Use cargo test for checkout regression checks.")
+                .kind(MemoryKind::Decision.as_str())
+                .scope("default")
+                .tag("decision")
+                .confidence(0.95),
+        )?;
+        engine.remember(
+            NewMemory::new("Use cargo test for checkout regression checks.")
+                .kind(MemoryKind::Decision.as_str())
+                .scope("default")
+                .tag("decision")
+                .confidence(0.91),
+        )?;
+        let stale = engine.remember(
+            NewMemory::new("Stale memory: use the old JSON store for checkout state.")
+                .kind(MemoryKind::Decision.as_str())
+                .scope("default")
+                .tag("stale")
+                .confidence(0.9),
+        )?;
+        engine.edit_memory(
+            &stale.id,
+            MemoryEdit {
+                status: Some(MemoryStatus::Superseded),
+                ..MemoryEdit::default()
+            },
+        )?;
+        engine.remember(
+            NewMemory::new("tool trace summary ".repeat(80))
+                .kind(MemoryKind::Summary.as_str())
+                .scope("default")
+                .tag("tool_trace_summary")
+                .confidence(0.8),
+        )?;
+        let report = build_ai_context_report(
+            &engine,
+            "fix checkout bug",
+            "generic",
+            700,
+            Some("default".to_string()),
+        )?;
+        assert!(report.compiled_tokens <= report.raw_tokens);
+        assert!(report.duplicate_blocked_tokens > 0);
+        assert!(report
+            .stale_summary
+            .iter()
+            .any(|item| item.contains("Stale memory")));
+        assert!(report.kv_positions_avoided() > 0);
+        assert!(report.signal_density_after() >= report.signal_density_before());
+        drop(engine);
+        fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn inference_fixtures_cover_batch_cache_runtime_and_rollup() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for path in [
+            "tests/fixtures/inference/huge_prompt_with_duplicates.txt",
+            "tests/fixtures/inference/stale_memories.json",
+            "tests/fixtures/inference/agent_trace_long.json",
+            "tests/fixtures/inference/multi_request_batch.json",
+            "tests/fixtures/inference/provider_cache_bad_order.md",
+            "tests/fixtures/inference/provider_cache_good_order.md",
+            "tests/fixtures/inference/runtime_profiles.json",
+            "tests/fixtures/inference/kv_budget_case.json",
+        ] {
+            assert!(root.join(path).exists(), "missing {path}");
+        }
+
+        let batch = batch_requests_from_file(
+            &root.join("tests/fixtures/inference/multi_request_batch.json"),
+        )
+        .expect("batch fixture parses");
+        assert_eq!(batch.len(), 3);
+
+        let bad =
+            fs::read_to_string(root.join("tests/fixtures/inference/provider_cache_bad_order.md"))
+                .expect("bad cache fixture");
+        let audit = cache_audit_text("openai", &bad);
+        assert_eq!(audit["cache_hit_risk"].as_str(), Some("high"));
+        assert!(audit["problems"]
+            .as_array()
+            .expect("problems")
+            .iter()
+            .any(|item| item.as_str().unwrap_or("").contains("dynamic text")));
+
+        let good =
+            fs::read_to_string(root.join("tests/fixtures/inference/provider_cache_good_order.md"))
+                .expect("good cache fixture");
+        let good_audit = cache_audit_text("openai", &good);
+        assert_eq!(good_audit["cache_hit_risk"].as_str(), Some("low"));
+
+        let profile = runtime_profile("llama.cpp");
+        assert!(profile["prefix_reuse_hint"]
+            .as_str()
+            .unwrap_or("")
+            .contains("stable"));
+        assert!(profile["kernel_warning"]
+            .as_str()
+            .unwrap_or("")
+            .contains("does not implement"));
+
+        let trace = fs::read_to_string(root.join("tests/fixtures/inference/agent_trace_long.json"))
+            .expect("trace fixture");
+        let rollup = rollup_trace_text(&trace, 50);
+        assert!(!rollup["decisions_made"].as_array().unwrap().is_empty());
+        assert!(rollup["token_rollup"].as_u64().unwrap_or(0) > 0);
+    }
+
+    #[test]
     fn manual_privacy_config_ignore_and_search_parse_new_variants() {
         let privacy = ManualPrivacyCli::try_parse_from(["privacy", "receipts", "--json"])
             .expect("privacy receipts parse should succeed");
@@ -15708,6 +18977,7 @@ mod tests {
             "docs/timeline.md",
             "docs/handoff.md",
             "docs/adoption.md",
+            "docs/context-compiler.md",
             "docs/integrations/cursor.md",
             "docs/integrations/claude.md",
             "docs/integrations/vscode.md",
@@ -15738,6 +19008,8 @@ mod tests {
             "docs/recipes/share-project-memory.md",
             "docs/recipes/rewind-a-project.md",
             "docs/recipes/onboard-a-new-developer.md",
+            "docs/recipes/optimize-ai-context.md",
+            "docs/recipes/avoid-repeat-ai-mistakes.md",
             "examples/dev-morning.md",
             "examples/dev-evening.md",
             "examples/dev-next.md",
@@ -15767,6 +19039,12 @@ mod tests {
             "examples/health.md",
             "examples/attach-cursor.md",
             "examples/attach-ollama.md",
+            "examples/context-compiler.md",
+            "examples/token-firewall.md",
+            "examples/kv-report.md",
+            "examples/trace-compression.md",
+            "examples/mistake-firewall.md",
+            "examples/agent-log.txt",
             "examples/share-project-memory.md",
             "examples/onboarding-brief.md",
             "examples/repo-health.md",

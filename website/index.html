@@ -17,6 +17,7 @@
       <a href="#start">Start</a>
       <a href="#workflow">Workflow</a>
       <a href="#context">AI Context</a>
+      <a href="#compiler">Compiler</a>
       <a href="#maps">Maps</a>
       <a href="#share">Share</a>
       <a href="#docs">Docs</a>
@@ -43,7 +44,7 @@
           <p class="lede">memory.cpp helps your repo remember what happened, why it changed, what broke, how it was fixed, what to do next, and what AI coding tools should know.</p>
           <div class="hero-commands">
             <code>memory dev morning</code>
-            <code>memory dev context --for cursor</code>
+            <code>memory compile "fix bug" --provider openai</code>
             <code>memory map --type evolution --output html</code>
           </div>
           <div class="actions">
@@ -58,7 +59,7 @@
         <div class="window-bar"><span></span><span></span><span></span><strong>first-five-minutes</strong></div>
         <pre class="terminal"><code>$ memory setup --developer --yes
 $ memory dev morning
-$ memory context write --for cursor
+$ memory compile "fix checkout bug" --provider openai --budget 1500
 $ memory share status
 $ memory adoption checklist</code></pre>
       </section>
@@ -97,6 +98,21 @@ memory handoff new-dev --output .memory.cpp/handoff
 memory share onboarding</code></pre><p class="output">Private-safe by default. Review the artifact, then share only what you choose.</p><div class="link-row"><a href="pages/pr-workflow.html">PR workflow</a><a href="pages/handoff.html">Handoff</a><a href="pages/shareable-artifacts.html">Share artifacts</a></div></div></div>
     </section>
 
+    <section class="section-head" id="compiler">
+      <p class="eyebrow">Context compiler</p>
+      <h2>Remember more. Send less. Run faster.</h2>
+      <p>Stop paying AI to reread the same context. memory.cpp compiles local repo memory into smaller task packs and reports what stayed out.</p>
+    </section>
+    <section class="grid three feature-row">
+      <article class="card"><h3>Token firewall</h3><p>Blocks duplicated, stale, oversized, or unsafe context before it reaches a prompt.</p><pre><code>memory token-firewall "fix checkout bug"
+memory doctor "add CSV export" --provider gemini</code></pre><a href="../examples/token-firewall.md">example output</a></article>
+      <article class="card"><h3>Provider cache plan</h3><p>Separates stable repo memory from fresh task data for OpenAI, Claude, Gemini, and generic/local tools.</p><pre><code>memory cache-plan "answer support ticket" --provider claude
+memory cache-audit --file prompt.md --provider openai</code></pre><a href="../docs/context-compiler.md">context compiler docs</a></article>
+      <article class="card"><h3>Inference cost stack</h3><p>Shows prefill reduction, KV positions avoided, signal density, cache strategy, batching, and runtime hints.</p><pre><code>memory prefill-report "fix checkout bug"
+memory kv-budget "fix checkout bug" --max-kv-tokens 4096
+memory signal-density "fix checkout bug"</code></pre><a href="../docs/inference-bottlenecks.md">8 bottlenecks guide</a></article>
+    </section>
+
     <section class="section-head" id="maps">
       <p class="eyebrow">Repo time machine</p>
       <h2>Turn local memory into maps, timelines, and explanations.</h2>
@@ -133,7 +149,7 @@ memory ci explain-failure</code></pre><p>Small practical memory for everyday dev
     </section>
     <section class="window docs-window"><div class="window-bar"><span></span><span></span><span></span><strong>manual</strong></div><div class="window-body">
       <div class="doc-nav">
-        <a href="pages/quickstart.html">Quickstart</a><a href="pages/install.html">Install</a><a href="pages/tour.html">5-minute tour</a><a href="pages/docs.html">Docs home</a><a href="pages/cli.html">CLI reference</a><a href="pages/dev-workflows.html">Dev workflows</a><a href="pages/integrations.html">Integrations</a><a href="pages/recipes.html">Recipes</a><a href="pages/examples.html">Examples</a><a href="pages/safety-privacy.html">Safety and privacy</a><a href="pages/architecture.html">Architecture</a><a href="pages/roadmap.html">Roadmap</a><a href="pages/changelog.html">Changelog</a><a href="pages/faq.html">FAQ</a><a href="pages/troubleshooting.html">Troubleshooting</a><a href="pages/contributing.html">Contributing</a><a href="pages/security-policy.html">Security policy</a><a href="../docs/share.md">Share docs</a><a href="../docs/pr-workflow.md">PR docs</a><a href="../docs/timeline.md">Timeline docs</a><a href="../docs/handoff.md">Handoff docs</a><a href="../docs/adoption.md">Adoption docs</a><a href="../docs/release-hardening.md">Release hardening</a><a href="../docs/api-stability.md">API stability</a><a href="../docs/compatibility.md">Compatibility</a><a href="../docs/limitations.md">Limitations</a><a href="../docs/performance.md">Performance</a><a href="../docs/security.md">Security notes</a><a href="../docs/dogfooding.md">Dogfooding</a><a href="../docs/release-process.md">Release process</a><a href="../docs/community.md">Community</a><a href="../docs/launch-checklist.md">Launch checklist</a><a href="../launch/demo-script.md">Demo script</a></div>
+        <a href="pages/quickstart.html">Quickstart</a><a href="pages/install.html">Install</a><a href="pages/tour.html">5-minute tour</a><a href="pages/docs.html">Docs home</a><a href="pages/cli.html">CLI reference</a><a href="pages/dev-workflows.html">Dev workflows</a><a href="pages/integrations.html">Integrations</a><a href="pages/recipes.html">Recipes</a><a href="pages/examples.html">Examples</a><a href="pages/safety-privacy.html">Safety and privacy</a><a href="pages/architecture.html">Architecture</a><a href="pages/roadmap.html">Roadmap</a><a href="pages/changelog.html">Changelog</a><a href="pages/faq.html">FAQ</a><a href="pages/troubleshooting.html">Troubleshooting</a><a href="pages/contributing.html">Contributing</a><a href="pages/security-policy.html">Security policy</a><a href="../docs/context-compiler.md">Context compiler</a><a href="../docs/inference-bottlenecks.md">Inference bottlenecks</a><a href="../docs/share.md">Share docs</a><a href="../docs/pr-workflow.md">PR docs</a><a href="../docs/timeline.md">Timeline docs</a><a href="../docs/handoff.md">Handoff docs</a><a href="../docs/adoption.md">Adoption docs</a><a href="../docs/release-hardening.md">Release hardening</a><a href="../docs/api-stability.md">API stability</a><a href="../docs/compatibility.md">Compatibility</a><a href="../docs/limitations.md">Limitations</a><a href="../docs/performance.md">Performance</a><a href="../docs/security.md">Security notes</a><a href="../docs/dogfooding.md">Dogfooding</a><a href="../docs/release-process.md">Release process</a><a href="../docs/community.md">Community</a><a href="../docs/launch-checklist.md">Launch checklist</a><a href="../launch/demo-script.md">Demo script</a></div>
     </div></section>
 
     <section class="section-head" id="trust">

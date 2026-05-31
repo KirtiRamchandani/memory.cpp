@@ -1,0 +1,6 @@
+$ cargo test -p memory-cli
+error: failed in crates/memory-cli/src/main.rs
+warning: unused helper in crates/memory-core/src/lib.rs
+fix: replace newest_file clone with std::slice::from_ref
+$ cargo clippy --workspace --all-targets -- -D warnings
+error: this function has too many arguments

@@ -42,6 +42,29 @@ cargo run -p memory-cli -- --db "$DB" dev next --workspace smoke-demo
 cargo run -p memory-cli -- --db "$DB" show-context
 cargo run -p memory-cli -- --db "$DB" context write --for generic --output "$DB_DIR/generic-context.md"
 cargo run -p memory-cli -- --db "$DB" context status
+cargo run -p memory-cli -- --db "$DB" mistake "Use cargo fmt before committing Rust changes."
+cargo run -p memory-cli -- --db "$DB" trace compress --file examples/agent-log.txt
+cargo run -p memory-cli -- --db "$DB" trace learn --file examples/agent-log.txt
+cargo run -p memory-cli -- --db "$DB" compile "fix checkout bug" --provider openai --budget 1500 --output "$DB_DIR/compiled-context.md"
+cargo run -p memory-cli -- --db "$DB" token-firewall "fix checkout bug" --provider openai --budget 2000
+cargo run -p memory-cli -- --db "$DB" cache-plan "fix checkout bug" --provider claude
+cargo run -p memory-cli -- --db "$DB" kv-report "fix checkout bug"
+cargo run -p memory-cli -- --db "$DB" prefill-report "fix checkout bug"
+cargo run -p memory-cli -- --db "$DB" kv-budget "fix checkout bug" --max-kv-tokens 4096
+cargo run -p memory-cli -- --db "$DB" signal-density "fix checkout bug"
+cargo run -p memory-cli -- --db "$DB" batch-plan --file tests/fixtures/inference/multi_request_batch.json --provider openai
+cargo run -p memory-cli -- --db "$DB" runtime-profile list
+cargo run -p memory-cli -- --db "$DB" cache-audit --provider openai --file tests/fixtures/inference/provider_cache_bad_order.md
+cargo run -p memory-cli -- --db "$DB" trace-rollup --from tests/fixtures/inference/agent_trace_long.json --every 50
+cargo run -p memory-cli -- --db "$DB" doctor "add CSV export" --provider gemini
+cargo run -p memory-cli -- --db "$DB" pack "fix checkout bug" --for generic --budget 1500 --output "$DB_DIR/generic-pack.md"
+cargo run -p memory-cli -- --db "$DB" mistakes
+cargo run -p memory-cli -- --db "$DB" stale
+cargo run -p memory-cli -- --db "$DB" conflicts
+cargo run -p memory-cli -- --db "$DB" savings
+cargo run -p memory-cli -- --db "$DB" runtime-plan "fix checkout bug" --runtime generic --budget 1200
+cargo run -p memory-cli -- --db "$DB" runtime-plan "fix checkout bug" --runtime llama.cpp --budget 1200
+cargo run -p memory-cli -- --db "$DB" bench-context
 cargo run -p memory-cli -- --db "$DB" config show
 cargo run -p memory-cli -- --db "$DB" config path
 cargo run -p memory-cli -- --db "$DB" config profiles

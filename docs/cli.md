@@ -74,6 +74,28 @@ memory terminal
 memory ci
 memory embeddings
 memory privacy
+memory pack
+memory token-firewall
+memory firewall
+memory cache-plan
+memory kv-report
+memory kv-compile
+memory prefill-report
+memory kv-budget
+memory signal-density
+memory batch-plan
+memory runtime-profile
+memory cache-audit
+memory trace-rollup
+memory trace
+memory mistake
+memory mistakes
+memory conflicts
+memory stale
+memory resolve
+memory savings
+memory runtime-plan
+memory bench-context
 ```
 
 ## Most important workflows
@@ -153,6 +175,32 @@ memory dev context --for cursor --workspace demo
 memory dev context --for codex --workspace demo
 memory dev context --for claude --workspace demo
 ```
+
+### Context compiler and token firewall
+
+```bash
+memory compile "fix checkout bug" --provider openai --budget 1500
+memory token-firewall "fix checkout bug" --provider openai --budget 2000
+memory cache-plan "answer support ticket" --provider claude
+memory kv-report "summarize customer history"
+memory prefill-report "fix checkout bug"
+memory kv-budget "fix checkout bug" --max-kv-tokens 4096
+memory signal-density "fix checkout bug"
+memory batch-plan --file tests/fixtures/inference/multi_request_batch.json --provider openai
+memory runtime-profile list
+memory runtime-plan "fix checkout bug" --runtime llama.cpp
+memory cache-audit --file tests/fixtures/inference/provider_cache_bad_order.md --provider openai
+memory trace-rollup --from tests/fixtures/inference/agent_trace_long.json --every 50
+memory trace compress --file examples/agent-log.txt
+memory mistake "Use pnpm only. Never npm."
+memory doctor "add CSV export" --provider gemini
+memory pack "fix checkout bug" --for codex --budget 1500
+memory savings
+```
+
+These commands are local-first prompt hygiene tools. They compile smaller task context, report estimated prompt-side KV pressure avoided, improve signal density, group shared prefixes, and keep stale or risky memory out of AI prompts. They do not directly control provider KV caches or low-level serving kernels.
+
+`memory doctor "<task>" --provider <provider>` includes an `Inference Cost Stack` section with raw and compiled context tokens, fresh suffix tokens, cacheable prefix tokens, omitted tokens, estimated prefill reduction, KV positions avoided, signal density, duplicate/stale/tool-trace tokens blocked, provider cache strategy, and runtime strategy.
 
 ### Embeddings
 

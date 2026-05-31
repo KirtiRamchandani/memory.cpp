@@ -45,6 +45,29 @@ cargo run -p memory-cli -- --db $db dev next --workspace smoke-demo
 cargo run -p memory-cli -- --db $db show-context
 cargo run -p memory-cli -- --db $db context write --for generic --output (Join-Path $dbDir 'generic-context.md')
 cargo run -p memory-cli -- --db $db context status
+cargo run -p memory-cli -- --db $db mistake "Use cargo fmt before committing Rust changes."
+cargo run -p memory-cli -- --db $db trace compress --file examples/agent-log.txt
+cargo run -p memory-cli -- --db $db trace learn --file examples/agent-log.txt
+cargo run -p memory-cli -- --db $db compile "fix checkout bug" --provider openai --budget 1500 --output (Join-Path $dbDir 'compiled-context.md')
+cargo run -p memory-cli -- --db $db token-firewall "fix checkout bug" --provider openai --budget 2000
+cargo run -p memory-cli -- --db $db cache-plan "fix checkout bug" --provider claude
+cargo run -p memory-cli -- --db $db kv-report "fix checkout bug"
+cargo run -p memory-cli -- --db $db prefill-report "fix checkout bug"
+cargo run -p memory-cli -- --db $db kv-budget "fix checkout bug" --max-kv-tokens 4096
+cargo run -p memory-cli -- --db $db signal-density "fix checkout bug"
+cargo run -p memory-cli -- --db $db batch-plan --file tests/fixtures/inference/multi_request_batch.json --provider openai
+cargo run -p memory-cli -- --db $db runtime-profile list
+cargo run -p memory-cli -- --db $db cache-audit --provider openai --file tests/fixtures/inference/provider_cache_bad_order.md
+cargo run -p memory-cli -- --db $db trace-rollup --from tests/fixtures/inference/agent_trace_long.json --every 50
+cargo run -p memory-cli -- --db $db doctor "add CSV export" --provider gemini
+cargo run -p memory-cli -- --db $db pack "fix checkout bug" --for generic --budget 1500 --output (Join-Path $dbDir 'generic-pack.md')
+cargo run -p memory-cli -- --db $db mistakes
+cargo run -p memory-cli -- --db $db stale
+cargo run -p memory-cli -- --db $db conflicts
+cargo run -p memory-cli -- --db $db savings
+cargo run -p memory-cli -- --db $db runtime-plan "fix checkout bug" --runtime generic --budget 1200
+cargo run -p memory-cli -- --db $db runtime-plan "fix checkout bug" --runtime llama.cpp --budget 1200
+cargo run -p memory-cli -- --db $db bench-context
 cargo run -p memory-cli -- --db $db config show
 cargo run -p memory-cli -- --db $db config path
 cargo run -p memory-cli -- --db $db config profiles
@@ -120,14 +143,26 @@ Start-Sleep -Seconds 2
 cargo run -p memory-cli -- --db $db status
 cargo run -p memory-cli -- --db $db stop
 
+function Invoke-MemoryMcpJson {
+    param([string]$Json, [string]$Name)
+    $memoryExe = Join-Path $PWD 'target\debug\memory.exe'
+    if (-not (Test-Path $memoryExe)) {
+        cargo build -p memory-cli
+    }
+    $requestPath = Join-Path $dbDir "$Name.jsonl"
+    Set-Content -Path $requestPath -Encoding ascii -Value $Json
+    $cmd = "`"$memoryExe`" --db `"$db`" mcp --workspace smoke-demo < `"$requestPath`""
+    return ((cmd /d /s /c $cmd) | Out-String)
+}
+
 $mcpRequest = '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
-$mcpResponse = (($mcpRequest | cargo run -q -p memory-cli -- --db $db mcp --workspace smoke-demo) | Out-String)
+$mcpResponse = Invoke-MemoryMcpJson -Json $mcpRequest -Name 'mcp-tools-list'
 if ($mcpResponse -notmatch 'memory_map' -or $mcpResponse -notmatch 'memory_add_candidate') {
     throw 'MCP tools/list did not include the expected safe launch tools.'
 }
 
 $mcpCall = '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memory_context","arguments":{"query":"MCP integration","workspace":"smoke-demo","tokens":256}}}'
-$mcpCallResponse = (($mcpCall | cargo run -q -p memory-cli -- --db $db mcp --workspace smoke-demo) | Out-String)
+$mcpCallResponse = Invoke-MemoryMcpJson -Json $mcpCall -Name 'mcp-context-call'
 if ($mcpCallResponse -notmatch 'MCP integration') {
     throw 'MCP tools/call did not return the expected context payload.'
 }

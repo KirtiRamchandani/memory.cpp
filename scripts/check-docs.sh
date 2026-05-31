@@ -8,10 +8,12 @@ required=(
   docs/ci-memory.md docs/watch.md docs/examples.md docs/troubleshooting.md
   docs/troubleshooting-install.md docs/architecture.md docs/roadmap.md docs/faq.md
   docs/changelog.md docs/launch-checklist.md docs/share.md docs/pr-workflow.md
-  docs/timeline.md docs/handoff.md docs/adoption.md
+  docs/timeline.md docs/handoff.md docs/adoption.md docs/context-compiler.md
+  docs/inference-bottlenecks.md
   docs/release-hardening.md docs/api-stability.md docs/compatibility.md
   docs/limitations.md docs/performance.md docs/security.md
   docs/dogfooding.md docs/release-process.md docs/community.md
+  docs/recipes/optimize-ai-context.md docs/recipes/avoid-repeat-ai-mistakes.md
 )
 for file in "${required[@]}"; do
   [[ -f "$file" ]] || { echo "missing $file" >&2; exit 1; }

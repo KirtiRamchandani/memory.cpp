@@ -1,0 +1,7 @@
+{
+  "requests": [
+    {"task":"fix checkout bug"},
+    {"task":"write checkout regression test"},
+    {"task":"summarize checkout failure for PR"}
+  ]
+}

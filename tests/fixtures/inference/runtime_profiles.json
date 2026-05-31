@@ -1,0 +1,7 @@
+[
+  {"runtime":"generic","recommended_context_budget":4096},
+  {"runtime":"llama.cpp","recommended_context_budget":4096},
+  {"runtime":"ollama","recommended_context_budget":4096},
+  {"runtime":"vllm","recommended_context_budget":8192},
+  {"runtime":"sglang","recommended_context_budget":8192}
+]

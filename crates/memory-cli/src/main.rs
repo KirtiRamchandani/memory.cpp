@@ -12354,6 +12354,21 @@ fn quarantine_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn inbox_candidate_confidence(item: &memory_core::InboxEntry) -> f32 {
+    item.metadata
+        .pointer("/memory_cpp/confidence")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.5) as f32
+}
+
+fn inbox_candidate_sensitivity(item: &memory_core::InboxEntry) -> &'static str {
+    if detect_sensitive_reason(&item.content).is_some() {
+        "high"
+    } else {
+        "low"
+    }
+}
+
 fn review_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
     let action = rest.first().map(String::as_str).unwrap_or("list");
     match action {
@@ -12374,7 +12389,9 @@ fn review_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
         "--approve-all-safe" | "approve-all-safe" => {
             let mut approved = 0usize;
             for item in engine.inbox(None, Some("pending"))? {
-                if candidate_confidence(&item) >= 0.9 && candidate_sensitivity(&item) == "low" {
+                if inbox_candidate_confidence(&item) >= 0.9
+                    && inbox_candidate_sensitivity(&item) == "low"
+                {
                     if approve_inbox_item(engine, &item.id, true)?.is_some() {
                         approved += 1;
                     }
@@ -12388,8 +12405,8 @@ fn review_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
                 println!(
                     "- {} confidence={:.2} risk={} {}",
                     item.id,
-                    candidate_confidence(&item),
-                    candidate_sensitivity(&item),
+                    inbox_candidate_confidence(&item),
+                    inbox_candidate_sensitivity(&item),
                     item.content
                 );
             }
@@ -12420,7 +12437,7 @@ fn flight_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
             write_public_artifact(
                 &current,
                 &serde_json::to_string_pretty(&json!({
-                    "session_id": Uuid::new_v4().to_string(),
+                    "session_id": format!("flight-{}", Utc::now().timestamp_millis()),
                     "goal": goal,
                     "tool": tool,
                     "started_at": Utc::now(),
@@ -12499,7 +12516,7 @@ fn read_pack_arg(engine: &MemoryEngine, value: Option<&str>) -> Result<String> {
                 "md",
             )
             .ok_or_else(|| anyhow!("no latest context pack found"))?;
-            fs::read_to_string(path)
+            Ok(fs::read_to_string(path)?)
         }
         Some(path) => {
             fs::read_to_string(path).with_context(|| format!("could not read pack {path}"))
@@ -12713,8 +12730,14 @@ fn warnings_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
         "prompt injection warnings: {}",
         report.prompt_injection_warnings
     );
-    for warning in &report.safety_warnings {
-        println!("- {warning}");
+    if report.prompt_injection_warnings > 0 {
+        println!("- prompt-injection-like text was blocked from compiled context");
+    }
+    if report.secret_like_blocks > 0 {
+        println!("- secret-like material was redacted or omitted");
+    }
+    if report.stale_blocked_tokens > 0 {
+        println!("- stale or superseded memory was excluded");
     }
     Ok(())
 }
@@ -12883,7 +12906,7 @@ fn agents_score_value(engine: &MemoryEngine, target: &str) -> Result<Value> {
     let checks = vec![
         json!({"label": "generated pack exists", "ok": newest_file(&[base.join("packs"), base.join("context")], "md").is_some()}),
         json!({"label": "hard rules present", "ok": !engine.search(RecallQuery::new("mistake rule hard do not").limit(1)).unwrap_or_default().is_empty()}),
-        json!({"label": "package manager known", "ok": detect_setup(&cwd).package_manager.is_some()}),
+        json!({"label": "package manager known", "ok": cwd.join("Cargo.toml").exists() || cwd.join("package.json").exists() || cwd.join("pyproject.toml").exists()}),
         json!({"label": "test commands known", "ok": infer_test_command(&cwd).is_some()}),
         json!({"label": "stale memory excluded", "ok": true}),
         json!({"label": "privacy status safe", "ok": Path::new(".memoryignore").exists()}),
@@ -17707,7 +17730,8 @@ fn parse_metadata(value: Option<&str>) -> Result<Value> {
 }
 
 fn parse_kind(value: &str) -> std::result::Result<MemoryKind, String> {
-    let normalized = match value.trim().to_ascii_lowercase().as_str() {
+    let lower = value.trim().to_ascii_lowercase();
+    let normalized = match lower.as_str() {
         "profile" | "relationship" => "persona",
         "failure" | "warning" | "contradiction" => "bug",
         "fix" | "rule" | "mistake" | "workflow_rule" => "workflow",

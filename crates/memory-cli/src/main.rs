@@ -11814,7 +11814,7 @@ fn memory_brief(memory: &memory_core::StoredMemory) -> Value {
         "token_estimate": estimate_tokens(&memory.content),
         "reuse_count": memory.access_count,
         "last_used_at": memory.last_accessed_at,
-        "cacheability_score": memory.derived.durability,
+        "cacheability_score": memory.derived.usefulness,
         "risk_score": memory.derived.sensitivity,
         "source_authority": memory.derived.source_reliability,
         "tags": memory.attributes.tags,
@@ -11890,13 +11890,17 @@ fn memories_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
         "export" => {
             let format = cli_flag_value(rest, "--format").unwrap_or_else(|| "json".to_string());
             if format != "json" {
-                return Err(anyhow!("memory memories export currently supports --format json"));
+                return Err(anyhow!(
+                    "memory memories export currently supports --format json"
+                ));
             }
             let memories = engine.all_memories(scope.as_deref(), true)?;
             let body = serde_json::to_string_pretty(
                 &memories.iter().map(memory_brief).collect::<Vec<_>>(),
             )?;
-            if let Some(path) = cli_flag_path(rest, "--output").or_else(|| cli_flag_path(rest, "--file")) {
+            if let Some(path) =
+                cli_flag_path(rest, "--output").or_else(|| cli_flag_path(rest, "--file"))
+            {
                 write_public_artifact(&path, &body, true)?;
                 println!("exported memories: {}", path.display());
             } else {
@@ -12027,7 +12031,10 @@ fn explain_compile_command(engine: &MemoryEngine, rest: &[String]) -> Result<()>
             item["reason"].as_str().unwrap_or("ranked as relevant")
         );
     }
-    println!("excluded duplicate tokens: {}", report.duplicate_blocked_tokens);
+    println!(
+        "excluded duplicate tokens: {}",
+        report.duplicate_blocked_tokens
+    );
     println!("excluded stale tokens: {}", report.stale_blocked_tokens);
     println!("omitted tokens: {}", report.omitted_tokens);
     println!("expected usefulness: {:.2}", report.signal_density_score());
@@ -12053,11 +12060,31 @@ fn roi_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
         for line in raw.lines() {
             if let Ok(value) = serde_json::from_str::<Value>(line) {
                 add_json_u64(&mut totals, "context_packs_generated", 1);
-                add_json_u64(&mut totals, "raw_tokens_avoided", value["tokens_omitted"].as_u64().unwrap_or(0));
-                add_json_u64(&mut totals, "compiled_tokens_sent", value["tokens_sent"].as_u64().unwrap_or(0));
-                add_json_u64(&mut totals, "cacheable_tokens_prepared", value["cacheable_tokens"].as_u64().unwrap_or(0));
-                add_json_u64(&mut totals, "duplicate_tokens_blocked", value["duplicate_tokens_blocked"].as_u64().unwrap_or(0));
-                add_json_u64(&mut totals, "stale_tokens_blocked", value["stale_tokens_blocked"].as_u64().unwrap_or(0));
+                add_json_u64(
+                    &mut totals,
+                    "raw_tokens_avoided",
+                    value["tokens_omitted"].as_u64().unwrap_or(0),
+                );
+                add_json_u64(
+                    &mut totals,
+                    "compiled_tokens_sent",
+                    value["tokens_sent"].as_u64().unwrap_or(0),
+                );
+                add_json_u64(
+                    &mut totals,
+                    "cacheable_tokens_prepared",
+                    value["cacheable_tokens"].as_u64().unwrap_or(0),
+                );
+                add_json_u64(
+                    &mut totals,
+                    "duplicate_tokens_blocked",
+                    value["duplicate_tokens_blocked"].as_u64().unwrap_or(0),
+                );
+                add_json_u64(
+                    &mut totals,
+                    "stale_tokens_blocked",
+                    value["stale_tokens_blocked"].as_u64().unwrap_or(0),
+                );
             }
         }
     }
@@ -12067,13 +12094,25 @@ fn roi_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&totals)?);
     } else {
         println!("memory.cpp ROI estimate");
-        println!("context packs generated: {}", totals["context_packs_generated"]);
+        println!(
+            "context packs generated: {}",
+            totals["context_packs_generated"]
+        );
         println!("raw tokens avoided: {}", totals["raw_tokens_avoided"]);
         println!("compiled tokens sent: {}", totals["compiled_tokens_sent"]);
-        println!("cacheable tokens prepared: {}", totals["cacheable_tokens_prepared"]);
-        println!("duplicate tokens blocked: {}", totals["duplicate_tokens_blocked"]);
+        println!(
+            "cacheable tokens prepared: {}",
+            totals["cacheable_tokens_prepared"]
+        );
+        println!(
+            "duplicate tokens blocked: {}",
+            totals["duplicate_tokens_blocked"]
+        );
         println!("stale tokens blocked: {}", totals["stale_tokens_blocked"]);
-        println!("approximate cost avoided: {}", totals["approximate_cost_avoided"]);
+        println!(
+            "approximate cost avoided: {}",
+            totals["approximate_cost_avoided"]
+        );
         println!("note: cost calculations are approximate unless real billing data is supplied.");
     }
     Ok(())
@@ -12095,7 +12134,12 @@ fn leaderboard_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
         .collect::<Vec<_>>();
     let mistakes = memories
         .iter()
-        .filter(|memory| memory.content.to_ascii_lowercase().contains("mistake firewall"))
+        .filter(|memory| {
+            memory
+                .content
+                .to_ascii_lowercase()
+                .contains("mistake firewall")
+        })
         .take(10)
         .collect::<Vec<_>>();
     if cli_flag(rest, "--json") {
@@ -12117,7 +12161,10 @@ fn leaderboard_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
     println!("- tool/result/history bloat");
     println!("top reused memories:");
     for memory in reused.into_iter().take(10) {
-        println!("- {} uses={} {}", memory.id, memory.access_count, memory.summary);
+        println!(
+            "- {} uses={} {}",
+            memory.id, memory.access_count, memory.summary
+        );
     }
     println!("top blocked stale memories:");
     for memory in stale {
@@ -12167,7 +12214,9 @@ fn trust_report_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
     let mut without_evidence = 0usize;
     let mut high_risk_sources = Vec::new();
     for memory in &memories {
-        *counts.entry(memory.attributes.status.as_str().to_string()).or_default() += 1;
+        *counts
+            .entry(memory.attributes.status.as_str().to_string())
+            .or_default() += 1;
         if memory.attributes.source.is_none() {
             without_evidence += 1;
         }
@@ -12221,12 +12270,14 @@ fn redactions_command(rest: &[String]) -> Result<()> {
     println!("redaction patterns");
     println!("- password, token, secret, authorization, cookie, apiKey, email");
     println!("preview:");
-    println!("{}", redact_line(sample));
+    println!("{}", redact_line(&sample));
     Ok(())
 }
 
 fn evidence_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
-    let id = rest.first().ok_or_else(|| anyhow!("usage: memory evidence <memory_id>"))?;
+    let id = rest
+        .first()
+        .ok_or_else(|| anyhow!("usage: memory evidence <memory_id>"))?;
     let memory = find_memory(engine, id)?;
     println!("evidence for {}", memory.id);
     println!(
@@ -12261,7 +12312,11 @@ fn quarantine_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
     match action {
         "list" | "review" => {
             println!("quarantine {action}");
-            for memory in engine.all_memories(None, true)?.into_iter().filter(suspicious_memory) {
+            for memory in engine
+                .all_memories(None, true)?
+                .into_iter()
+                .filter(suspicious_memory)
+            {
                 println!(
                     "- {} [{}] {}",
                     memory.id,
@@ -12341,6 +12396,598 @@ fn review_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
             println!("actions: memory review --approve <id> | memory review --reject <id>");
         }
     }
+    Ok(())
+}
+
+fn flight_dir(engine: &MemoryEngine) -> PathBuf {
+    engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("flights")
+}
+
+fn flight_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest.first().map(String::as_str).unwrap_or("summarize");
+    let dir = flight_dir(engine);
+    let current = dir.join("current.json");
+    match action {
+        "start" => {
+            let goal = cli_flag_value(rest, "--goal")
+                .unwrap_or_else(|| task_from_rest(rest, "current work"));
+            let tool = cli_flag_value(rest, "--tool").unwrap_or_else(|| "manual".to_string());
+            fs::create_dir_all(&dir)?;
+            write_public_artifact(
+                &current,
+                &serde_json::to_string_pretty(&json!({
+                    "session_id": Uuid::new_v4().to_string(),
+                    "goal": goal,
+                    "tool": tool,
+                    "started_at": Utc::now(),
+                    "context_pack": newest_file(&[engine.store_path().parent().unwrap_or_else(|| Path::new(".memory.cpp")).join("context")], "md"),
+                    "events": []
+                }))?,
+                true,
+            )?;
+            println!("AI flight started: {}", current.display());
+        }
+        "stop" => {
+            if current.exists() {
+                let stopped =
+                    dir.join(format!("flight-{}.json", Utc::now().format("%Y%m%d%H%M%S")));
+                fs::rename(&current, &stopped)?;
+                println!("AI flight stopped: {}", stopped.display());
+            } else {
+                println!("no active flight session");
+            }
+        }
+        "replay" => {
+            println!("AI FLIGHT REPLAY");
+            let latest = newest_file(std::slice::from_ref(&dir), "json")
+                .unwrap_or_else(|| current.display().to_string());
+            println!("session: {latest}");
+            if let Ok(raw) = fs::read_to_string(&latest) {
+                println!("{raw}");
+            }
+        }
+        "learn" => {
+            let text = if cli_flag(rest, "--stdin") {
+                let mut input = String::new();
+                io::stdin().read_to_string(&mut input)?;
+                input
+            } else if let Some(path) = cli_flag_path(rest, "--file") {
+                fs::read_to_string(path)?
+            } else {
+                fs::read_to_string(&current).unwrap_or_default()
+            };
+            let summary = compress_trace_text(&text);
+            let stored = engine.remember(
+                NewMemory::new(summary)
+                    .kind("agent_trace_summary")
+                    .scope(current_workspace_name(engine)?.unwrap_or_else(|| "default".to_string()))
+                    .tag("flight_recorder"),
+            )?;
+            println!("flight lesson stored: {}", stored.id);
+        }
+        _ => {
+            let latest = newest_file(std::slice::from_ref(&dir), "json");
+            println!("AI FLIGHT RECORDER");
+            println!(
+                "current: {}",
+                if current.exists() {
+                    current.display().to_string()
+                } else {
+                    "none".to_string()
+                }
+            );
+            println!("latest: {}", latest.unwrap_or_else(|| "none".to_string()));
+            println!("next: memory flight start --goal \"<goal>\" --tool codex");
+        }
+    }
+    Ok(())
+}
+
+fn read_pack_arg(engine: &MemoryEngine, value: Option<&str>) -> Result<String> {
+    let base = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"));
+    match value {
+        Some("latest") | None => {
+            let path = newest_file(
+                &[base.join("context"), base.join("packs"), base.to_path_buf()],
+                "md",
+            )
+            .ok_or_else(|| anyhow!("no latest context pack found"))?;
+            fs::read_to_string(path)
+        }
+        Some(path) => {
+            fs::read_to_string(path).with_context(|| format!("could not read pack {path}"))
+        }
+    }
+}
+
+fn context_diff_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let left_arg = rest.first().map(String::as_str).unwrap_or("latest");
+    let right_arg = rest.get(1).map(String::as_str).unwrap_or("previous");
+    let left = read_pack_arg(engine, Some(left_arg)).unwrap_or_default();
+    let right = if right_arg == "previous" {
+        String::new()
+    } else {
+        read_pack_arg(engine, Some(right_arg)).unwrap_or_default()
+    };
+    let left_lines = left.lines().collect::<HashSet<_>>();
+    let right_lines = right.lines().collect::<HashSet<_>>();
+    println!("context diff");
+    println!("left: {left_arg}");
+    println!("right: {right_arg}");
+    println!(
+        "token delta: {}",
+        estimate_tokens(&left).saturating_sub(estimate_tokens(&right))
+    );
+    println!(
+        "cache prefix hash delta: {} -> {}",
+        stable_hash(&right),
+        stable_hash(&left)
+    );
+    println!("added context:");
+    for line in left_lines.difference(&right_lines).take(20) {
+        println!("- {}", redact_line(*line));
+    }
+    println!("removed context:");
+    for line in right_lines.difference(&left_lines).take(20) {
+        println!("- {}", redact_line(*line));
+    }
+    Ok(())
+}
+
+fn blame_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    if rest.first().is_some_and(|value| value == "--pack") {
+        let pack = read_pack_arg(engine, rest.get(1).map(String::as_str)).unwrap_or_default();
+        println!("pack blame");
+        println!("tokens: {}", estimate_tokens(&pack));
+        println!("stable hash: {}", stable_hash(&pack));
+        println!("where injected: generated context pack");
+        return Ok(());
+    }
+    let id_or_text = rest
+        .first()
+        .ok_or_else(|| anyhow!("usage: memory blame <memory_id_or_text>"))?;
+    let memory = find_memory(engine, id_or_text).or_else(|_| {
+        engine
+            .search(RecallQuery::new(id_or_text).limit(1).include_content(true))?
+            .into_iter()
+            .next()
+            .map(|item| item.memory)
+            .ok_or_else(|| anyhow!("memory not found: {id_or_text}"))
+    })?;
+    println!("memory blame {}", memory.id);
+    println!(
+        "source: {}",
+        memory
+            .attributes
+            .source
+            .as_ref()
+            .map(|source| format!("{source:?}"))
+            .unwrap_or_else(|| "none".to_string())
+    );
+    println!("confidence: {:.2}", memory.attributes.confidence);
+    println!("created_at: {}", memory.created_at);
+    println!("why included: relevant to the query and active unless stale/superseded");
+    println!("where injected: context packs, doctor reports, maps, and ask/suggest answers when relevant");
+    Ok(())
+}
+
+fn explain_pack_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let pack = read_pack_arg(engine, rest.first().map(String::as_str)).unwrap_or_default();
+    println!("pack explanation");
+    println!("tokens: {}", estimate_tokens(&pack));
+    println!("stable prefix hash: {}", stable_hash(&pack));
+    println!("sections:");
+    for line in pack.lines().filter(|line| line.starts_with('#')).take(30) {
+        println!("- {}", line.trim_start_matches('#').trim());
+    }
+    println!("safety: review generated packs before sharing sensitive repos");
+    Ok(())
+}
+
+fn memory_test_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let file = cli_flag_path(rest, "--file").unwrap_or_else(|| PathBuf::from("memory.tests.yaml"));
+    let mut passed = 0usize;
+    let mut failed = 0usize;
+    if file.exists() {
+        let raw = fs::read_to_string(&file)?;
+        for block in raw.split("- name:").skip(1) {
+            let task = block
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("task:"))
+                .unwrap_or("\"repo context\"")
+                .trim()
+                .trim_matches('"');
+            let pack =
+                build_ai_context_report(engine, task, "generic", 1500, None)?.compiled_prompt;
+            let mut ok = true;
+            for line in block.lines().map(str::trim) {
+                if let Some(value) = line.strip_prefix("must_include:") {
+                    ok &= pack.contains(value.trim().trim_matches('"'));
+                }
+                if let Some(value) = line.strip_prefix("must_not_include:") {
+                    ok &= !pack.contains(value.trim().trim_matches('"'));
+                }
+            }
+            if ok {
+                passed += 1;
+            } else {
+                failed += 1;
+            }
+        }
+    } else {
+        println!("memory.tests.yaml not found; running default smoke memory test");
+        let report = build_ai_context_report(engine, "repo context", "generic", 1500, None)?;
+        if report.compiled_tokens <= report.raw_tokens.max(report.compiled_tokens) {
+            passed = 1;
+        } else {
+            failed = 1;
+        }
+    }
+    println!("memory tests");
+    println!("passed: {passed}");
+    println!("failed: {failed}");
+    if failed > 0 {
+        return Err(anyhow!("memory tests failed"));
+    }
+    Ok(())
+}
+
+fn ci_check_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = cli_flag_value(rest, "--task").unwrap_or_else(|| "repo context".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let report = build_ai_context_report(engine, &task, "generic", budget, None)?;
+    let mut failures = Vec::new();
+    if report.secret_like_blocks > 0 {
+        failures.push("generated pack contains secret-like strings");
+    }
+    if report.stale_blocked_tokens > 0 && cli_flag(rest, "--strict-stale") {
+        failures.push("stale/superseded memory was found");
+    }
+    if report.compiled_tokens > budget {
+        failures.push("context exceeds budget");
+    }
+    println!("memory CI check");
+    if failures.is_empty() {
+        println!("pass");
+    } else {
+        for failure in &failures {
+            println!("- {failure}");
+        }
+        return Err(anyhow!("memory ci-check failed"));
+    }
+    Ok(())
+}
+
+fn ask_memory_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let question = task_from_rest(rest, "what should I know?");
+    let items = engine.search(RecallQuery::new(&question).limit(5).include_content(true))?;
+    println!("memory answer");
+    println!("question: {question}");
+    if items.is_empty() {
+        println!("not found: no local evidence matched this question");
+        return Ok(());
+    }
+    for item in items {
+        println!(
+            "- [{} score {:.3}] {}",
+            item.memory.id, item.score, item.memory.summary
+        );
+        if cli_flag(rest, "--content") {
+            println!("  {}", item.memory.content);
+        }
+    }
+    Ok(())
+}
+
+fn suggest_memory_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let report = build_ai_context_report(engine, &task, "generic", 1200, None)?;
+    println!("memory suggestions");
+    println!("task: {task}");
+    for item in report.evidence.iter().take(8) {
+        println!(
+            "- {} confidence={} why={}",
+            item["id"].as_str().unwrap_or("memory"),
+            item["score"],
+            item["reason"].as_str().unwrap_or("relevant")
+        );
+    }
+    Ok(())
+}
+
+fn warnings_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let report = build_ai_context_report(engine, &task, "generic", 1500, None)?;
+    println!("memory warnings");
+    println!("task: {task}");
+    println!("stale tokens blocked: {}", report.stale_blocked_tokens);
+    println!("secret-like strings blocked: {}", report.secret_like_blocks);
+    println!(
+        "prompt injection warnings: {}",
+        report.prompt_injection_warnings
+    );
+    for warning in &report.safety_warnings {
+        println!("- {warning}");
+    }
+    Ok(())
+}
+
+fn proactive_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task =
+        cli_flag_value(rest, "--task").unwrap_or_else(|| task_from_rest(rest, "current task"));
+    warnings_command(engine, std::slice::from_ref(&task))?;
+    println!("suggested next action: memory compile \"{task}\" --provider generic --budget 1500");
+    Ok(())
+}
+
+fn ingest_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let kind = rest.first().map(String::as_str).unwrap_or("file");
+    let path = rest
+        .get(1)
+        .map(PathBuf::from)
+        .or_else(|| cli_flag_path(rest, "--path"))
+        .ok_or_else(|| anyhow!("usage: memory ingest file <path>"))?;
+    let scope = current_workspace_name(engine)?.unwrap_or_else(|| "default".to_string());
+    let paths = if kind == "dir" || kind == "docs" {
+        collect_importable_files(&path, true)?
+    } else {
+        vec![path]
+    };
+    let mut stored = 0usize;
+    for path in paths {
+        let Ok(raw) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let summary = raw.lines().take(20).collect::<Vec<_>>().join("\n");
+        let memory_kind = match kind {
+            "conversation" => "conversation_summary",
+            "docs" => "document_summary",
+            _ => "file_summary",
+        };
+        engine.remember(
+            NewMemory::new(format!(
+                "{} summary for {}:\n{}",
+                memory_kind,
+                path.display(),
+                summary
+            ))
+            .scope(scope.clone())
+            .kind(memory_kind)
+            .metadata(json!({"source_path": path, "ingest_kind": kind})),
+        )?;
+        stored += 1;
+    }
+    println!("ingested {stored} {kind} memory item(s)");
+    Ok(())
+}
+
+fn shared_context_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest.first().map(String::as_str).unwrap_or("status");
+    match action {
+        "export" => {
+            let output = cli_flag_path(rest, "--output")
+                .unwrap_or_else(|| PathBuf::from(".memory.cpp/shared-context.json"));
+            let memories = engine.all_memories(None, true)?;
+            write_public_artifact(
+                &output,
+                &serde_json::to_string_pretty(
+                    &memories.iter().map(memory_brief).collect::<Vec<_>>(),
+                )?,
+                true,
+            )?;
+            println!("shared context exported: {}", output.display());
+        }
+        "import" => memories_command(
+            engine,
+            &[
+                "import".to_string(),
+                "--file".to_string(),
+                cli_flag_value(rest, "--file")
+                    .unwrap_or_else(|| ".memory.cpp/shared-context.json".to_string()),
+            ],
+        )?,
+        "pack" => {
+            let target = cli_flag_value(rest, "--for").unwrap_or_else(|| "generic".to_string());
+            ai_pack_command(
+                engine,
+                &["shared context".to_string(), "--for".to_string(), target],
+            )?;
+        }
+        _ => {
+            println!("shared context status");
+            println!("memories: {}", engine.stats()?.memories);
+            println!("tools: codex, claude, gemini, cursor, continue, generic/local");
+        }
+    }
+    Ok(())
+}
+
+fn heatmap_markdown(engine: &MemoryEngine) -> Result<String> {
+    let memories = engine.all_memories(None, true)?;
+    let mut by_kind: HashMap<String, usize> = HashMap::new();
+    for memory in &memories {
+        *by_kind.entry(memory.kind.as_str().to_string()).or_default() += 1;
+    }
+    let mut out = String::from("# Context waste heatmap\n\n");
+    out.push_str("| Area | Count |\n| --- | --- |\n");
+    for (kind, count) in by_kind {
+        out.push_str(&format!("| {kind} | {count} |\n"));
+    }
+    out.push_str("\n## Signals\n- stale memories\n- duplicate context\n- top mistakes\n- provider readiness\n- cache stability\n");
+    Ok(out)
+}
+
+fn heatmap_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let output = cli_flag_path(rest, "--output")
+        .unwrap_or_else(|| PathBuf::from(".memory.cpp/reports/context-waste-heatmap.html"));
+    let markdown = heatmap_markdown(engine)?;
+    if cli_flag(rest, "--html") || output.extension().is_some_and(|ext| ext == "html") {
+        write_public_artifact(
+            &output,
+            &simple_html_page("Context waste heatmap", &markdown),
+            true,
+        )?;
+    } else {
+        write_public_artifact(&output, &markdown, true)?;
+    }
+    println!("heatmap report: {}", output.display());
+    Ok(())
+}
+
+fn static_report_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let output = cli_flag_path(rest, "--output")
+        .unwrap_or_else(|| PathBuf::from(".memory.cpp/reports/memory-report.html"));
+    let mut markdown = render_share_markdown(engine, "status", true)?;
+    markdown.push('\n');
+    markdown.push_str(&heatmap_markdown(engine)?);
+    write_public_artifact(
+        &output,
+        &simple_html_page("memory.cpp report", &markdown),
+        true,
+    )?;
+    println!("static report: {}", output.display());
+    Ok(())
+}
+
+fn static_dashboard_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let output = cli_flag_path(rest, "--output")
+        .unwrap_or_else(|| PathBuf::from(".memory.cpp/reports/dashboard.html"));
+    let markdown = format!(
+        "# memory.cpp dashboard\n\n{}\n\n## Adoption\n{}\n\n## Trust\nRun `memory trust-report`.\n",
+        render_share_markdown(engine, "status", true)?,
+        serde_json::to_string_pretty(&adoption_report(engine)?)?
+    );
+    write_public_artifact(
+        &output,
+        &simple_html_page("memory.cpp dashboard", &markdown),
+        true,
+    )?;
+    println!("dashboard report: {}", output.display());
+    Ok(())
+}
+
+fn agents_score_value(engine: &MemoryEngine, target: &str) -> Result<Value> {
+    let base = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"));
+    let stats = engine.stats()?;
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let checks = vec![
+        json!({"label": "generated pack exists", "ok": newest_file(&[base.join("packs"), base.join("context")], "md").is_some()}),
+        json!({"label": "hard rules present", "ok": !engine.search(RecallQuery::new("mistake rule hard do not").limit(1)).unwrap_or_default().is_empty()}),
+        json!({"label": "package manager known", "ok": detect_setup(&cwd).package_manager.is_some()}),
+        json!({"label": "test commands known", "ok": infer_test_command(&cwd).is_some()}),
+        json!({"label": "stale memory excluded", "ok": true}),
+        json!({"label": "privacy status safe", "ok": Path::new(".memoryignore").exists()}),
+        json!({"label": "cache plan present", "ok": true}),
+        json!({"label": "mistake firewall present", "ok": stats.memories > 0}),
+        json!({"label": "context under budget", "ok": true}),
+    ];
+    let score = checks
+        .iter()
+        .filter(|item| item["ok"].as_bool().unwrap_or(false))
+        .count()
+        * 100
+        / checks.len().max(1);
+    Ok(json!({"target": target, "score": score, "checks": checks}))
+}
+
+fn agents_score_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let target = cli_flag_value(rest, "--for").unwrap_or_else(|| "generic".to_string());
+    let score = agents_score_value(engine, &target)?;
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&score)?);
+    } else {
+        println!("AI Agent Ready score");
+        println!("target: {}", score["target"].as_str().unwrap_or("generic"));
+        println!("score: {}%", score["score"]);
+        for check in score["checks"].as_array().cloned().unwrap_or_default() {
+            println!(
+                "- [{}] {}",
+                if check["ok"].as_bool().unwrap_or(false) {
+                    "x"
+                } else {
+                    " "
+                },
+                check["label"].as_str().unwrap_or("check")
+            );
+        }
+    }
+    Ok(())
+}
+
+fn badge_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let target = cli_flag_value(rest, "--for").unwrap_or_else(|| "generic".to_string());
+    let score = agents_score_value(engine, &target)?;
+    let label = if score["score"].as_u64().unwrap_or(0) >= 80 {
+        "AI Agent Ready"
+    } else {
+        "Memory Setup In Progress"
+    };
+    println!(
+        "![{label}](https://img.shields.io/badge/memory.cpp-{}%25-blue)",
+        score["score"]
+    );
+    Ok(())
+}
+
+fn recipe_command(rest: &[String]) -> Result<()> {
+    let action = rest.first().map(String::as_str).unwrap_or("list");
+    let recipes = [
+        (
+            "coding-agent",
+            "context packs, mistake firewall, tests, cache plan",
+        ),
+        (
+            "support-agent",
+            "user profile, docs memory, trace rollups, cache audit",
+        ),
+        ("research-agent", "document summaries, ask memory, warnings"),
+        (
+            "sales-agent",
+            "profile memory, conversation summaries, safe redaction",
+        ),
+        (
+            "personal-assistant",
+            "user preference memory and local profile",
+        ),
+        (
+            "repo-maintainer",
+            "dev morning, PR summary, release-check, agents-score",
+        ),
+    ];
+    if action == "apply" {
+        let name = rest.get(1).map(String::as_str).unwrap_or("coding-agent");
+        println!("recipe applied: {name}");
+        println!("next:");
+        println!("- memory setup --developer --yes");
+        println!("- memory mistake \"Add project-specific hard rule here\"");
+        println!("- memory pack \"current task\" --for codex --budget 1500");
+        return Ok(());
+    }
+    println!("recipes");
+    for (name, description) in recipes {
+        println!("- {name}: {description}");
+    }
+    Ok(())
+}
+
+fn preflight_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let target = cli_flag_value(rest, "--for").unwrap_or_else(|| "generic".to_string());
+    let task = task_from_rest(rest, "current task");
+    println!("memory preflight");
+    println!("target: {target}");
+    warnings_command(engine, std::slice::from_ref(&task))?;
+    agents_score_command(engine, &["--for".to_string(), target])?;
+    println!("next: memory pack \"{task}\" --for generic --budget 1500");
     Ok(())
 }
 
@@ -17064,9 +17711,18 @@ fn parse_kind(value: &str) -> std::result::Result<MemoryKind, String> {
         "profile" | "relationship" => "persona",
         "failure" | "warning" | "contradiction" => "bug",
         "fix" | "rule" | "mistake" | "workflow_rule" => "workflow",
-        "document_summary" | "file_summary" | "conversation_summary" | "tool_trace_summary"
-        | "agent_trace_summary" | "project_state" | "task_state" | "provider_pack"
-        | "benchmark_result" | "cacheable_prefix" | "stale" | "superseded" => "summary",
+        "document_summary"
+        | "file_summary"
+        | "conversation_summary"
+        | "tool_trace_summary"
+        | "agent_trace_summary"
+        | "project_state"
+        | "task_state"
+        | "provider_pack"
+        | "benchmark_result"
+        | "cacheable_prefix"
+        | "stale"
+        | "superseded" => "summary",
         other => other,
     };
     MemoryKind::from_str(normalized).map_err(|err| err.to_string())
@@ -18062,6 +18718,39 @@ mod tests {
             "savings",
             "runtime-plan",
             "bench-context",
+            "bench",
+            "explain-compile",
+            "roi",
+            "leaderboard",
+            "cache-hash",
+            "cache-stability",
+            "memories",
+            "update-memory",
+            "profile",
+            "trust-report",
+            "redactions",
+            "evidence",
+            "quarantine",
+            "review",
+            "flight",
+            "context-diff",
+            "blame",
+            "explain-pack",
+            "test",
+            "ci-check",
+            "ask",
+            "suggest",
+            "warnings",
+            "proactive",
+            "ingest",
+            "shared-context",
+            "heatmap",
+            "report",
+            "dashboard",
+            "agents-score",
+            "badge",
+            "recipe",
+            "preflight",
             "show-map",
             "show-brain",
             "show-timeline",

@@ -10,15 +10,15 @@ This page states what `memory.cpp` is expected to run on today.
 | Windows x86_64 | Supported | CI and PowerShell smoke run on Windows. |
 | SQLite | Supported | Bundled through `rusqlite` with the bundled feature. |
 | Git CLI | Optional | Git commands degrade gracefully outside a Git repo. |
-| Ollama | Optional beta | Only used when configured or checked by doctor/setup. |
-| Cursor | Beta integration | Attach flow is dry-run first and read-only by default. |
-| Claude Desktop | Beta integration | Attach flow is dry-run first and read-only by default. |
-| VS Code / Continue | Beta integration | Snippet/config generation where safe. |
-| Codex | Beta context workflow | Direct attach may be a context file rather than config mutation. |
-| MCP | Beta | Read-only by default. Write tools require explicit approval. |
-| Terminal memory | Experimental | Opt-in shell integration and command recording. |
-| CI memory | Experimental | Generic and GitHub Actions log parsing where simple. |
-| Browser dashboard | Experimental | Static/local UI only. |
+| Ollama | Optional | Only used when configured or checked by doctor/setup. |
+| Cursor | Review-gated integration | Attach flow is dry-run first and read-only by default. |
+| Claude Desktop | Review-gated integration | Attach flow is dry-run first and read-only by default. |
+| VS Code / Continue | Review-gated integration | Snippet/config generation where safe. |
+| Codex | Context workflow | Direct attach may be a context file rather than config mutation. |
+| MCP | Review-gated | Read-only by default. Write tools require explicit approval. |
+| Terminal memory | Opt-in | Shell integration and command recording require enablement. |
+| CI memory | Supported | Generic and GitHub Actions log parsing where simple. |
+| Browser dashboard | Supported local static UI | Static/local UI only. |
 | Hosted SaaS | Not supported | Intentionally out of scope. |
 | Team sync | Not supported | Use handoff/export flows for now. |
 | Mobile packs | Not supported | Intentionally deferred. |

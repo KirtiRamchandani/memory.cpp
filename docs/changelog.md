@@ -16,7 +16,7 @@ memory dev release-notes
 
 ## README and Release Hardening Polish
 
-- Reworked README into a structured public project front door with hot topics, quick start, command matrix, maturity labels, docs links, examples, and release gates.
+- Reworked README into a structured public project front door with hot topics, quick start, command matrix, product surface labels, docs links, examples, and release gates.
 - Added SECURITY.md plus security notes, compatibility, API stability, limitations, performance, dogfooding, release process, community, and release-hardening docs.
 - Added release-candidate scripts for bounded local validation.
 - Added GitHub issue/PR templates, CODEOWNERS, and Dependabot configuration.

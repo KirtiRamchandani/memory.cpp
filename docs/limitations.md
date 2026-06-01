@@ -28,11 +28,11 @@ Generated docs and handoff bundles are starting points. Review them before publi
 
 Local memory, CI import, Git watch, and terminal memory are practical developer tools. Distributed sync and exactly-once delivery are out of scope.
 
-## Some integrations are beta
+## Some integrations are review-gated
 
 Editor and assistant attach flows are dry-run first and config-safe, but tool-specific config formats can change.
 
-## Devtools/dashboard are local and experimental
+## Devtools/dashboard are local only
 
 The dashboard is not a hosted product. Do not expose local devtools to untrusted networks.
 
@@ -40,6 +40,6 @@ The dashboard is not a hosted product. Do not expose local devtools to untrusted
 
 The current provider label represents local semantic retrieval intent. The repo does not bundle a true ONNX Runtime backend today.
 
-## Experimental commands may change
+## Opt-in workflows need explicit setup
 
-Terminal memory, CI memory, dashboard surfaces, and some map exports are experimental. Use `memory release-check` and the docs before relying on them in automation.
+Terminal memory, editor attach, MCP config writes, and automatic watch flows require explicit user action. Use `memory release-check` and the docs before relying on them in automation.

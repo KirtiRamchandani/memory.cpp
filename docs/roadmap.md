@@ -92,4 +92,4 @@ A v1.0 candidate should have:
 - install docs tested on all supported platforms
 - security policy and known limitations kept current
 - examples that run or are clearly marked static
-- no false maturity claims for beta/experimental surfaces
+- no false claims about opt-in, review-gated, or external-runtime surfaces

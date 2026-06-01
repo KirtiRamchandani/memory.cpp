@@ -1,37 +1,39 @@
 # API stability
 
-`memory.cpp` is pre-1.0, but the public surface should still be predictable.
+`memory.cpp` keeps the public surface predictable: existing command names remain available, JSON output grows additively where practical, and local data stays readable across releases.
 
-## Stability labels
+## Surface labels
 
 | Label | Meaning |
 | --- | --- |
-| Stable | Expected to remain compatible across minor releases. Breaking changes require clear migration notes. |
-| Beta | Useful and intended to stay, but output details or flags can change before 1.0. |
-| Experimental | Available for feedback. Names, output, behavior, or storage details may change. |
+| Implemented | Available in the CLI/API and covered by docs, tests, or smoke scripts. |
+| Review-gated | Available, but edits or config writes require dry-run, review, or explicit approval. |
+| Opt-in | Off by default until the user enables it. |
+| External | Depends on a user-installed tool or runtime. |
 | Internal | Not intended for users. No compatibility promise. |
 
 ## Public surface map
 
-| Surface | Stability | Notes |
+| Surface | Status | Notes |
 | --- | --- | --- |
-| `memory remember` | Stable | Core write path. |
-| `memory search` | Stable | Core recall path. |
-| `memory explain` | Stable | Beginner explanation surface. |
-| `memory edit/restore/history` | Stable | Versioned memory management. |
-| SQLite storage schema | Stable core, evolving metadata | Core tables stay small; metadata may expand. |
-| C API in `include/` | Beta | Useful for embeddings and host integrations. |
-| `memory dev morning/resume/next` | Beta | Daily developer workflow output may improve over time. |
-| `memory context` and `memory dev context` | Beta | Context sections and budgets may evolve. |
-| `memory map` | Beta | Formats are useful but visual output can improve. |
-| `memory inbox` | Beta | Candidate review model is expected to remain. |
-| `memory git watch` and `memory watch` | Beta | Daemon behavior is intentionally conservative. |
-| `memory terminal` | Experimental | Opt-in command capture. |
-| `memory ci` | Experimental | Lightweight log memory, not a CI platform. |
-| Embedding provider registry | Experimental | Hash provider is default; ONNX Runtime is not bundled. |
-| Dashboard/static website | Experimental | Static and local-first; not a hosted app. |
+| `memory remember` | Implemented | Core write path. |
+| `memory search` | Implemented | Core recall path. |
+| `memory explain` | Implemented | Beginner explanation surface. |
+| `memory edit/restore/history` | Implemented | Versioned memory management. |
+| SQLite storage schema | Implemented | Core tables stay small; metadata may expand additively. |
+| Rust API and C API | Implemented | Useful for embeddings and host integrations. |
+| `memory wow/autopilot/ship-demo` | Implemented | One-command launch/demo loop and local artifacts. |
+| `memory dev morning/resume/next` | Implemented | Daily developer workflow output. |
+| `memory context` and `memory dev context` | Implemented | Context sections and budgets are explicit. |
+| `memory map` | Implemented | Static HTML, Markdown, Mermaid, and JSON output. |
+| `memory inbox` | Review-gated | Candidate review model is approval-first. |
+| `memory git watch` and `memory watch` | Review-gated | Automatic capture writes candidates first. |
+| `memory terminal` | Opt-in | Command capture stays disabled until enabled. |
+| `memory ci` | Implemented | Lightweight log memory, not a CI platform. |
+| Embedding provider registry | External | Hash provider is default; ONNX Runtime is not bundled. |
+| Dashboard/static website | Implemented | Static and local-first; not a hosted app. |
 
-## Compatibility promises before 1.0
+## Compatibility promises
 
 - Existing command names should not be removed without a deprecation note.
 - JSON output should be extended rather than reshaped when practical.

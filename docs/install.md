@@ -74,7 +74,7 @@ memory config set profile low-ram
 memory embeddings set hash
 ```
 
-This avoids heavy local model dependencies. The `fastembed`/`onnx` provider label is currently an experimental lightweight local semantic backend, not a bundled ONNX Runtime.
+This avoids heavy local model dependencies. The `fastembed`/`onnx` provider label currently maps to a lightweight local semantic backend; the repository does not bundle ONNX Runtime.
 
 ## Common mistakes
 

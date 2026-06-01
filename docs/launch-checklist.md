@@ -12,9 +12,9 @@ Use this before a public release.
 - `cargo build -p memory-cli` passes.
 - Smoke scripts pass on PowerShell and Bash.
 - Privacy docs explain purge, redaction, and local-first behavior.
-- Known beta limitations are documented.
+- Known boundaries and intentionally omitted cloud/team features are documented.
 - `SECURITY.md` is present and linked from README.
-- `docs/api-stability.md` labels stable, beta, experimental, and internal surfaces.
+- `docs/api-stability.md` labels implemented, review-gated, opt-in, external, and internal surfaces.
 - `docs/compatibility.md` says which platforms and integrations are supported.
 - `docs/release-hardening.md` explains fresh clone and built-binary verification.
 - Release workflow emits checksums.
@@ -28,4 +28,4 @@ Use this before a public release.
 - [ ] `memory adoption checklist` gives the next activation step
 - [ ] `memory release-check` passes before tagging
 - [ ] `./scripts/release-candidate.sh` or `./scripts/release-candidate.ps1` passes
-- [ ] README hot topics, quick start, docs links, limitations, and maturity labels are current
+- [ ] README hot topics, quick start, docs links, limitations, and product surface labels are current

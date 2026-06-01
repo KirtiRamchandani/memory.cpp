@@ -53,7 +53,7 @@ Confirm:
 - checksum files exist
 - combined `checksums.txt` exists
 - generated release notes are accurate
-- known beta/experimental features are not described as stable
+- opt-in/review-gated/external surfaces are described accurately
 
 ## 6. After release
 

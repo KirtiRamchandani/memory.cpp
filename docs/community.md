@@ -20,7 +20,7 @@ Prefer:
 - low dependency count
 - small schemas
 - exact commands in output
-- honest maturity labels
+- honest product surface labels
 - examples that run from a clean checkout
 
 Avoid:

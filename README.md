@@ -21,7 +21,7 @@ Stop paying AI to reread the same context. `memory.cpp` compiles local repo memo
 - **Local-first trust model:** SQLite storage under `.memory.cpp/`, read-only MCP by default, candidate review before uncertain memory, and no cloud account required.
 - **Context compiler:** `memory compile`, `memory token-firewall`, `memory cache-plan`, and `memory kv-report` help reduce duplicated prompt context before it reaches an AI assistant.
 - **CI hardening:** Linux, macOS, and Windows run format, Clippy, tests, and smoke checks. Release builds generate checksums.
-- **Honest maturity:** local memory, context compilation, pack generation, safety checks, and static reports are implemented as local-first CLI/API surfaces. Optional editor/MCP attachment remains review-gated and never uploads data by default.
+- **Launch-ready local product:** memory vault, context compiler, pack generation, safety checks, static reports, and public API surfaces are implemented locally. Editor/MCP attachment remains review-gated and never uploads data by default.
 
 ---
 
@@ -45,6 +45,7 @@ Start a repo memory workspace:
 
 ```bash
 memory setup --developer --yes
+memory wow
 memory dev morning
 memory context write --for cursor --output .memory.cpp/context/cursor.md
 memory map --type evolution --output html --save .memory.cpp/maps/evolution.html
@@ -58,6 +59,35 @@ cargo build -p memory-cli
 cargo run -p memory-cli -- setup --developer --yes
 cargo run -p memory-cli -- dev morning
 ```
+
+## 60-second wow demo
+
+```bash
+memory wow
+memory autopilot "fix billing export bug" --for codex --budget 1500
+memory doctor "fix billing export bug" --provider openai
+memory agents-score
+```
+
+Example shape:
+
+```text
+memory wow complete
+report: .memory.cpp/reports/wow/wow-report.md
+pack: .memory.cpp/reports/wow/codex-pack.md
+doctor: .memory.cpp/reports/wow/doctor.json
+bench: .memory.cpp/reports/wow/bench.json
+dashboard: .memory.cpp/reports/wow/dashboard.html
+
+TOKEN REPORT
+Raw context available: 84,000 tokens
+Compiled context: 1,420 tokens
+Omitted: 76,780 tokens
+Estimated KV pressure avoided: 82,580 token positions
+Signal density improvement: 8.4x
+```
+
+What just happened: memory.cpp seeded the local loop, compiled a compact task pack, estimated prompt-side waste, wrote static reports, and kept all data on disk.
 
 ## What memory.cpp does
 
@@ -268,24 +298,25 @@ memory handoff new-dev --output .memory.cpp/handoff
 
 Artifacts are private-safe by default and are generated from local memory, Git, terminal, CI, maps, and redaction rules when available.
 
-## Maturity matrix
+## Product surface
 
-| Surface | Stability | Notes |
+| Surface | Status | Notes |
 | --- | --- | --- |
-| SQLite storage | Stable | Durable local memory database. |
-| Workspaces | Stable | Repo/project-scoped memory. |
-| Remember, search, explain | Stable | Core memory loop. |
-| Edit, restore, history | Stable | Versioned memory edits. |
-| C API | Beta | Useful for embedding, still pre-1.0. |
-| `memory dev morning/resume/next` | Beta | Daily developer workflows. |
-| `memory map` HTML/Markdown/Mermaid/JSON | Beta | Signature visualization surface. |
-| Candidate inbox | Beta | Review uncertain automatic memory. |
-| Git memory and watch | Beta | Local Git-derived candidates. |
-| AI context packs | Beta | Practical, cited context for assistants. |
-| Terminal memory | Experimental | Opt-in command recording. |
-| CI memory | Experimental | Lightweight log ingestion, not a CI platform. |
-| FastEmbed/ONNX provider label | Experimental | Current implementation is lightweight local semantic hashing; no bundled ONNX Runtime is claimed. |
-| Dashboard/static site | Experimental | Helpful local UI, not a hosted app. |
+| SQLite memory vault | Implemented | Durable local memory database. |
+| Workspaces | Implemented | Repo/project-scoped memory. |
+| Remember, recall, ask, explain | Implemented | Core memory loop with local evidence. |
+| Edit, restore, history | Implemented | Versioned memory edits. |
+| Rust API and C API | Implemented | Local SDK surfaces for apps and embedding. |
+| `memory wow` and `memory autopilot` | Implemented | One-command local product loop and provider pack writer. |
+| `memory dev morning/resume/next` | Implemented | Daily developer workflows. |
+| `memory map` HTML/Markdown/Mermaid/JSON | Implemented | Static project evolution maps. |
+| Candidate inbox | Implemented | Review uncertain automatic memory. |
+| Git memory and watch | Implemented | Local Git-derived candidates. |
+| AI context packs | Implemented | Cited context for Codex, Claude, Gemini, Cursor, Continue, MCP, and generic/local tools. |
+| Terminal memory | Opt-in | Command recording is off until the user enables it. |
+| CI memory | Implemented | Lightweight log ingestion, explanation, report, and PR comment output. |
+| FastEmbed/ONNX provider label | Available with honest limits | Current implementation is lightweight local semantic hashing; no bundled ONNX Runtime is claimed. |
+| Dashboard/static site | Implemented | Offline HTML reports and single-page product site. |
 
 See [API stability](docs/api-stability.md) and [compatibility](docs/compatibility.md).
 
@@ -307,10 +338,10 @@ flowchart LR
 | Path | Status | Notes |
 | --- | --- | --- |
 | Release binary | Preferred | Install scripts try GitHub release assets first. |
-| Cargo from source | Stable | `cargo build -p memory-cli` or installer fallback. |
-| Linux/macOS shell script | Beta | `scripts/install.sh`, supports `--dry-run`. |
-| Windows PowerShell script | Beta | `scripts/install.ps1`, supports `-DryRun`. |
-| Homebrew/NPM/Docker | Not shipped | Documented as future packaging, not claimed today. |
+| Cargo from source | Available | `cargo build -p memory-cli` or installer fallback. |
+| Linux/macOS shell script | Available | `scripts/install.sh`, supports `--dry-run`. |
+| Windows PowerShell script | Available | `scripts/install.ps1`, supports `-DryRun`. |
+| Homebrew/NPM/Docker | Not included | The project does not claim those installers today. |
 
 ## Documentation
 
@@ -411,4 +442,4 @@ Good contributions keep the product lane tight: everyday developers, local-first
 
 ## Known limitations
 
-`memory.cpp` is pre-1.0. Some flows are beta or experimental, and local signals only become useful after there is data to summarize. It does not provide hosted sync, team permissions, enterprise policy, or cloud dashboards. See [known limitations](docs/limitations.md) for the full list.
+`memory.cpp` is a local-first developer tool. It becomes more useful as your repo accumulates memories, terminal history, Git signals, CI logs, docs, and reviewed candidates. It does not provide hosted sync, team permissions, enterprise policy, or cloud dashboards. See [known limitations](docs/limitations.md) for the full list.

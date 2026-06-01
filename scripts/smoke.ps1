@@ -36,6 +36,7 @@ New-Item -ItemType Directory -Force -Path $dbDir | Out-Null
 Set-Content -Path $safeIngest -Value "Smoke ingest note: memory.cpp stores local project facts, commands, decisions, and next steps." -Encoding UTF8
 
 & (Join-Path $PSScriptRoot 'install.ps1') -DryRun
+& (Join-Path $PSScriptRoot 'demo-terminal.ps1') -DryRun -Output (Join-Path $dbDir 'terminal-demo')
 Run-Memory --db $db init --workspace smoke-demo
 Run-Memory --db $db setup --developer --yes --workspace smoke-demo
 Run-Memory --db $db what

@@ -69,6 +69,22 @@ memory doctor "fix billing export bug" --provider openai
 memory agents-score
 ```
 
+For a deterministic launch transcript:
+
+```bash
+./scripts/demo-terminal.sh --dry-run
+./scripts/demo-terminal.sh
+```
+
+PowerShell:
+
+```powershell
+./scripts/demo-terminal.ps1 -DryRun
+./scripts/demo-terminal.ps1
+```
+
+The scripts write terminal-demo artifacts under `.memory.cpp/reports/demo/` and never install optional recording tools automatically.
+
 Example shape:
 
 ```text

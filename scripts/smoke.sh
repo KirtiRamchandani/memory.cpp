@@ -22,6 +22,7 @@ mkdir -p "$DB_DIR"
 printf '%s\n' 'Smoke ingest note: memory.cpp stores local project facts, commands, decisions, and next steps.' > "$SAFE_INGEST"
 
 "$SCRIPT_DIR/install.sh" --dry-run
+"$SCRIPT_DIR/demo-terminal.sh" --dry-run --output "$DB_DIR/terminal-demo"
 cargo run -p memory-cli -- --db "$DB" init --workspace smoke-demo
 cargo run -p memory-cli -- --db "$DB" setup --developer --yes --workspace smoke-demo
 cargo run -p memory-cli -- --db "$DB" what

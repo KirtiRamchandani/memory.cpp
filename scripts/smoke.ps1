@@ -52,6 +52,9 @@ Run-Memory --db $db examples run billing-export
 Run-Memory --db $db privacy status
 Run-Memory --db $db demo seed --workspace smoke-demo --path .
 Run-Memory --db $db demo multi-model --workspace smoke-demo --path .
+Run-Memory --db $db wow --json "fix checkout bug"
+Run-Memory --db $db autopilot "fix checkout bug" --for codex --budget 1500 --output (Join-Path $dbDir 'autopilot-codex.md')
+Run-Memory --db $db ship-demo --output (Join-Path $dbDir 'ship-demo.md')
 Run-Memory --db $db inbox stats --workspace smoke-demo
 Run-Memory --db $db inbox review --workspace smoke-demo
 Run-Memory --db $db inbox rules
@@ -97,6 +100,10 @@ Run-Memory --db $db warnings "change auth flow"
 Run-Memory --db $db proactive --task "prepare release"
 Run-Memory --db $db trust-report
 Run-Memory --db $db redactions
+Run-Memory --db $db mcp-scan
+Run-Memory --db $db mcp-harden --dry-run --output (Join-Path $dbDir 'mcp-policy.json')
+Run-Memory --db $db sign --root $dbDir --output (Join-Path $dbDir 'signatures\manifest.json')
+Run-Memory --db $db verify --manifest (Join-Path $dbDir 'signatures\manifest.json')
 Run-Memory --db $db quarantine review
 Run-Memory --db $db review
 Run-Memory --db $db flight start --goal "fix checkout bug" --tool codex
@@ -174,6 +181,10 @@ Run-Memory --db $db docs list
 Run-Memory --db $db docs summarize
 Run-Memory --db $db docs search context
 Run-Memory --db $db pr summary --base main --output (Join-Path $dbDir 'pr-summary.md')
+Run-Memory --db $db pr-comment --base main --output (Join-Path $dbDir 'pr-comment.md')
+Run-Memory --db $db pr-context --base main --output (Join-Path $dbDir 'pr-context.md')
+Run-Memory --db $db git-learn --since HEAD~1 --dry-run
+Run-Memory --db $db branch-summary --base main --output (Join-Path $dbDir 'branch-summary.md')
 Run-Memory --db $db timeline week --output (Join-Path $dbDir 'repo-timeline.md')
 Run-Memory --db $db rewind last-week --output (Join-Path $dbDir 'rewind.md')
 Run-Memory --db $db changed --since "7 days ago" --output (Join-Path $dbDir 'changed.md')

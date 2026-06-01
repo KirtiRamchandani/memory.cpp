@@ -38,6 +38,9 @@ cargo run -p memory-cli -- --db "$DB" examples run billing-export
 cargo run -p memory-cli -- --db "$DB" privacy status
 cargo run -p memory-cli -- --db "$DB" demo seed --workspace smoke-demo --path .
 cargo run -p memory-cli -- --db "$DB" demo multi-model --workspace smoke-demo --path .
+cargo run -p memory-cli -- --db "$DB" wow --json "fix checkout bug"
+cargo run -p memory-cli -- --db "$DB" autopilot "fix checkout bug" --for codex --budget 1500 --output "$DB_DIR/autopilot-codex.md"
+cargo run -p memory-cli -- --db "$DB" ship-demo --output "$DB_DIR/ship-demo.md"
 cargo run -p memory-cli -- --db "$DB" inbox stats --workspace smoke-demo
 cargo run -p memory-cli -- --db "$DB" inbox review --workspace smoke-demo
 cargo run -p memory-cli -- --db "$DB" inbox rules
@@ -83,6 +86,10 @@ cargo run -p memory-cli -- --db "$DB" warnings "change auth flow"
 cargo run -p memory-cli -- --db "$DB" proactive --task "prepare release"
 cargo run -p memory-cli -- --db "$DB" trust-report
 cargo run -p memory-cli -- --db "$DB" redactions
+cargo run -p memory-cli -- --db "$DB" mcp-scan
+cargo run -p memory-cli -- --db "$DB" mcp-harden --dry-run --output "$DB_DIR/mcp-policy.json"
+cargo run -p memory-cli -- --db "$DB" sign --root "$DB_DIR" --output "$DB_DIR/signatures/manifest.json"
+cargo run -p memory-cli -- --db "$DB" verify --manifest "$DB_DIR/signatures/manifest.json"
 cargo run -p memory-cli -- --db "$DB" quarantine review
 cargo run -p memory-cli -- --db "$DB" review
 cargo run -p memory-cli -- --db "$DB" flight start --goal "fix checkout bug" --tool codex
@@ -165,6 +172,10 @@ cargo run -p memory-cli -- --db "$DB" docs list
 cargo run -p memory-cli -- --db "$DB" docs summarize
 cargo run -p memory-cli -- --db "$DB" docs search context
 cargo run -p memory-cli -- --db "$DB" pr summary --base main --output "$DB_DIR/pr-summary.md"
+cargo run -p memory-cli -- --db "$DB" pr-comment --base main --output "$DB_DIR/pr-comment.md"
+cargo run -p memory-cli -- --db "$DB" pr-context --base main --output "$DB_DIR/pr-context.md"
+cargo run -p memory-cli -- --db "$DB" git-learn --since HEAD~1 --dry-run
+cargo run -p memory-cli -- --db "$DB" branch-summary --base main --output "$DB_DIR/branch-summary.md"
 cargo run -p memory-cli -- --db "$DB" timeline week --output "$DB_DIR/repo-timeline.md"
 cargo run -p memory-cli -- --db "$DB" rewind last-week --output "$DB_DIR/rewind.md"
 cargo run -p memory-cli -- --db "$DB" changed --since "7 days ago" --output "$DB_DIR/changed.md"

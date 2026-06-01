@@ -1,3 +1,4 @@
+mod api;
 mod compression;
 mod config;
 mod embedding;
@@ -12,6 +13,15 @@ mod storage;
 mod types;
 mod vector;
 
+pub use api::{
+    askMemory, attachProvider, auditProviderCache, calculateSignalDensity, compileContext,
+    compressToolTrace, createContextPack, doctor, estimateKvPressure, estimatePrefill,
+    generateBatchPlan, generateRuntimePlan, planProviderCache, recordMemory, recordMistake,
+    rollupTrace, scoreAgentReadiness, testMemory, BatchGroup, BatchPlanOptions, BatchPlanReport,
+    CacheAuditReport, ContextControlOptions, ContextControlReport, KvPressureReport,
+    MemoryRecordOptions, PrefillReport, RuntimePlanOptions, RuntimePlanReport, SignalDensityReport,
+    TokenFirewallReport,
+};
 pub use compression::{CompressionConfig, Compressor, HeuristicCompressor};
 pub use config::EngineConfig;
 pub use embedding::{Embedder, FastEmbedOnnxEmbedder, HashEmbedder, SharedEmbedder};

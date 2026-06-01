@@ -21,7 +21,7 @@ Stop paying AI to reread the same context. `memory.cpp` compiles local repo memo
 - **Local-first trust model:** SQLite storage under `.memory.cpp/`, read-only MCP by default, candidate review before uncertain memory, and no cloud account required.
 - **Context compiler:** `memory compile`, `memory token-firewall`, `memory cache-plan`, and `memory kv-report` help reduce duplicated prompt context before it reaches an AI assistant.
 - **CI hardening:** Linux, macOS, and Windows run format, Clippy, tests, and smoke checks. Release builds generate checksums.
-- **Honest maturity:** core memory is stable; git/dev/map/inbox flows are beta; terminal, CI, dashboard, and FastEmbed/ONNX intent remain experimental.
+- **Honest maturity:** local memory, context compilation, pack generation, safety checks, and static reports are implemented as local-first CLI/API surfaces. Optional editor/MCP attachment remains review-gated and never uploads data by default.
 
 ---
 
@@ -82,6 +82,9 @@ The main goal of `memory.cpp` is to make a software repository explainable and r
 
 | Command | Why developers run it |
 | --- | --- |
+| `memory wow` | Run the local wow loop and write a shareable report, pack, doctor JSON, bench JSON, and dashboard. |
+| `memory autopilot "fix checkout bug" --for codex` | Compile context, write a provider pack, audit cache layout, and print exact next commands. |
+| `memory ship-demo` | Generate deterministic offline demo artifacts for launch or README screenshots. |
 | `memory setup --developer --yes` | Create safe local defaults for a repo. |
 | `memory dev morning` | See what changed, what broke, and what to do next. |
 | `memory dev resume` | Reconstruct interrupted work. |
@@ -95,6 +98,8 @@ The main goal of `memory.cpp` is to make a software repository explainable and r
 | `memory batch-plan --file requests.json --provider openai` | Group requests by shared stable prefixes and fresh suffixes. |
 | `memory cache-plan "answer support ticket" --provider claude` | Print a provider-aware stable-prefix/fresh-suffix layout plan. |
 | `memory cache-audit --file prompt.md --provider openai` | Detect why provider cache hits may fail. |
+| `memory cache-hash` | Print a stable-prefix hash for cache planning. |
+| `memory cache-stability` | Explain whether the latest stable prefix is likely cacheable. |
 | `memory kv-report "summarize customer history"` | Estimate prompt-side KV pressure avoided by sending less context. |
 | `memory runtime-plan "fix checkout bug" --runtime llama.cpp` | Print vendor-neutral runtime hints for local engines. |
 | `memory trace compress --file agent-log.txt` | Turn a noisy tool trace into a small reusable summary. |
@@ -109,7 +114,12 @@ The main goal of `memory.cpp` is to make a software repository explainable and r
 | `memory context-diff latest previous` | Diff generated context packs like code. |
 | `memory agents-score --for codex` | Score how ready the repo is for AI coding tools. |
 | `memory trust-report` | Audit active, stale, low-confidence, and evidence-free memories. |
+| `memory mcp-scan` | Inspect local MCP config for risky write tools or secret-like wording. |
+| `memory mcp-harden --dry-run` | Preview a read-only MCP policy for safe attachment. |
+| `memory sign` | Write local hash metadata for generated packs and reports. |
+| `memory verify` | Verify generated artifacts against the local manifest. |
 | `memory roi --input-cost 2.50` | Estimate approximate token-cost avoidance from local savings logs. |
+| `memory leaderboard` | Show top token-waste sources, reused memories, stale blocks, and cache prefixes. |
 | `memory map --type evolution --output html` | Generate a project evolution map. |
 | `memory map why "SQLite storage"` | Explain why a node or decision exists. |
 | `memory inbox review` | Approve, edit, or reject candidate memories. |
@@ -117,6 +127,10 @@ The main goal of `memory.cpp` is to make a software repository explainable and r
 | `memory terminal search "how did I run tests?"` | Recall useful command history after opt-in. |
 | `memory ci explain-failure` | Summarize imported CI failure logs. |
 | `memory pr summary --base main` | Generate a PR-ready change summary. |
+| `memory pr-comment --base main` | Generate Markdown suitable for a PR comment. |
+| `memory pr-context --base main` | Generate reviewer context from branch changes and memory. |
+| `memory git-learn --since HEAD~5` | Convert recent Git activity into reviewable local memory candidates. |
+| `memory branch-summary --base main` | Print or write a branch summary without network calls. |
 | `memory handoff new-dev` | Create a private-safe onboarding bundle. |
 | `memory share status` | Create a shareable repo memory summary. |
 | `memory release-check` | Check release readiness from the CLI. |
@@ -211,10 +225,17 @@ What just happened: memory.cpp kept the data local, reused the existing memories
 
 ```bash
 memory demo multi-model
+memory wow
+memory autopilot "fix billing export bug" --for codex --budget 1500
+memory ship-demo
 memory pack "fix checkout bug" --for gemini --budget 1500
 memory pack "fix checkout bug" --for mcp --budget 1500
 memory attach gemini --dry-run
 memory attach mcp --dry-run
+memory mcp-scan
+memory mcp-harden --dry-run
+memory sign
+memory verify
 memory docs list
 memory docs summarize
 memory docs search "provider cache"

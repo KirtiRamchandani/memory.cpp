@@ -3079,6 +3079,45 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
             let engine = build_engine_from_options(&options)?;
             preflight_command(&engine, &rest)?;
         }
+        "wow" => {
+            let engine = build_engine_from_options(&options)?;
+            wow_command(&engine, &rest)?;
+        }
+        "autopilot" => {
+            let engine = build_engine_from_options(&options)?;
+            autopilot_command(&engine, &rest)?;
+        }
+        "ship-demo" => {
+            let engine = build_engine_from_options(&options)?;
+            ship_demo_command(&engine, &rest)?;
+        }
+        "mcp-scan" => {
+            mcp_scan_command(&rest)?;
+        }
+        "mcp-harden" => {
+            mcp_harden_command(&rest)?;
+        }
+        "sign" => {
+            sign_command(&rest)?;
+        }
+        "verify" => {
+            verify_command(&rest)?;
+        }
+        "pr-comment" => {
+            let engine = build_engine_from_options(&options)?;
+            pr_shortcut_command(&engine, "comment", &rest)?;
+        }
+        "pr-context" => {
+            let engine = build_engine_from_options(&options)?;
+            pr_shortcut_command(&engine, "context", &rest)?;
+        }
+        "git-learn" => {
+            let engine = build_engine_from_options(&options)?;
+            git_learn_command(&engine, &rest)?;
+        }
+        "branch-summary" => {
+            branch_summary_command(&rest)?;
+        }
         "recall" | "search" => {
             let args = ManualRecallCli::parse_from(
                 std::iter::once(command.clone()).chain(rest.iter().cloned()),
@@ -3742,6 +3781,17 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "badge",
         "recipe",
         "preflight",
+        "wow",
+        "autopilot",
+        "ship-demo",
+        "mcp-scan",
+        "mcp-harden",
+        "sign",
+        "verify",
+        "pr-comment",
+        "pr-context",
+        "git-learn",
+        "branch-summary",
         "recall",
         "search",
         "explain",
@@ -10608,6 +10658,38 @@ fn stable_hash(input: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
+fn stable_hash_bytes(input: &[u8]) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    input.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn collect_signable_files(root: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+    if !root.exists() {
+        return Ok(());
+    }
+    if root.is_file() {
+        files.push(root.to_path_buf());
+        return Ok(());
+    }
+    for entry in fs::read_dir(root)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_signable_files(&path, files)?;
+            continue;
+        }
+        let ext = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if matches!(ext.as_str(), "md" | "json" | "html" | "txt" | "mmd") {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
 fn provider_cache_strategy(report: &AiContextReport) -> String {
     report
         .cache_plan
@@ -13117,6 +13199,433 @@ fn preflight_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
     warnings_command(engine, std::slice::from_ref(&task))?;
     agents_score_command(engine, &["--for".to_string(), target])?;
     println!("next: memory pack \"{task}\" --for generic --budget 1500");
+    Ok(())
+}
+
+fn wow_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "fix the billing export bug");
+    let apply = cli_flag(rest, "--apply");
+    let json_output = cli_flag(rest, "--json");
+    let base = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("reports")
+        .join("wow");
+    fs::create_dir_all(&base)?;
+
+    let report = build_ai_context_report(engine, &task, "codex", 1500, None)?;
+    let pack_path = base.join("codex-pack.md");
+    let doctor_path = base.join("doctor.json");
+    let bench_path = base.join("bench.json");
+    let dashboard_path = base.join("dashboard.html");
+    let wow_path = base.join("wow-report.md");
+
+    write_public_artifact(&pack_path, &provider_pack_body("codex", &report), true)?;
+    write_public_artifact(
+        &doctor_path,
+        &serde_json::to_string_pretty(&json!({
+            "task": task,
+            "inference_cost_stack": inference_cost_stack_json(&report, "generic"),
+            "local_only": true,
+        }))?,
+        true,
+    )?;
+    write_public_artifact(
+        &bench_path,
+        &serde_json::to_string_pretty(&json!({
+            "scenario": "wow local product loop",
+            "raw_tokens": report.raw_tokens,
+            "final_tokens": report.compiled_tokens,
+            "reduction_percent": format!("{:.1}", report.reduction_percent()),
+            "estimated_kv_positions_avoided": report.kv_positions_avoided(),
+            "pass": report.compiled_tokens <= report.budget,
+        }))?,
+        true,
+    )?;
+    write_public_artifact(
+        &dashboard_path,
+        &simple_html_page(
+            "memory.cpp wow dashboard",
+            &render_share_markdown(engine, "status", true)?,
+        ),
+        true,
+    )?;
+
+    let mut out = String::new();
+    out.push_str("# memory.cpp wow report\n\n");
+    out.push_str("Local-only product loop: init -> demo -> doctor -> pack -> attach -> preflight -> agents-score -> bench -> dashboard.\n\n");
+    out.push_str(&format!("Task: `{task}`\n\n"));
+    out.push_str(&format!(
+        "- Raw context tokens: {}\n- Compiled context tokens: {}\n- Estimated KV positions avoided: {}\n- Signal density improvement: {:.2}x\n- Stable prefix hash: {}\n\n",
+        report.raw_tokens,
+        report.compiled_tokens,
+        report.kv_positions_avoided(),
+        report.signal_density_improvement(),
+        stable_hash(&report.stable_prefix)
+    ));
+    out.push_str("## Files\n");
+    for path in [&pack_path, &doctor_path, &bench_path, &dashboard_path] {
+        out.push_str(&format!("- `{}`\n", path.display()));
+    }
+    out.push_str("\n## Next commands\n");
+    out.push_str(&format!("- `memory preflight --for codex \"{task}\"`\n"));
+    out.push_str(&format!(
+        "- `memory attach all {}`\n",
+        if apply { "--yes" } else { "--dry-run" }
+    ));
+    out.push_str("- `memory agents-score`\n");
+    write_public_artifact(&wow_path, &out, true)?;
+
+    let result = json!({
+        "task": task,
+        "report": wow_path.display().to_string(),
+        "pack": pack_path.display().to_string(),
+        "doctor": doctor_path.display().to_string(),
+        "bench": bench_path.display().to_string(),
+        "dashboard": dashboard_path.display().to_string(),
+        "attach_mode": if apply { "apply" } else { "dry-run" },
+        "local_only": true,
+    });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else {
+        println!("memory wow complete");
+        println!("report: {}", wow_path.display());
+        println!("pack: {}", pack_path.display());
+        println!("doctor: {}", doctor_path.display());
+        println!("bench: {}", bench_path.display());
+        println!("dashboard: {}", dashboard_path.display());
+        if apply {
+            println!("attach all: apply requested; use `memory attach all --yes` when ready.");
+        } else {
+            println!("attach all: dry-run by default to protect editor config.");
+        }
+        println!(
+            "next: memory preflight --for codex \"{}\"",
+            result["task"].as_str().unwrap_or("")
+        );
+    }
+    Ok(())
+}
+
+fn autopilot_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let provider = cli_flag_value(rest, "--provider")
+        .or_else(|| cli_flag_value(rest, "--for"))
+        .unwrap_or_else(|| "codex".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let output = cli_flag_path(rest, "--output").unwrap_or_else(|| {
+        PathBuf::from(".memory.cpp")
+            .join("packs")
+            .join(format!("autopilot-{}.md", normalize_provider(&provider)))
+    });
+    let json_output = cli_flag(rest, "--json");
+    let report = build_ai_context_report(engine, &task, &provider, budget, None)?;
+    let pack = provider_pack_body(&provider, &report);
+    write_public_artifact(&output, &pack, true)?;
+    record_savings_report(engine, &report)?;
+    let payload = json!({
+        "task": task,
+        "provider": normalize_provider(&provider),
+        "output": output.display().to_string(),
+        "compiled_tokens": report.compiled_tokens,
+        "budget": budget,
+        "estimated_kv_positions_avoided": report.kv_positions_avoided(),
+        "stable_prefix_hash": stable_hash(&report.stable_prefix),
+        "cache_audit_hint": "stable prefix first, dynamic suffix last",
+        "local_only": true,
+        "next_command": format!("memory attach {} --dry-run", normalize_provider(&provider)),
+    });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        println!("memory autopilot");
+        println!("task: {}", payload["task"].as_str().unwrap_or(""));
+        println!("provider: {}", payload["provider"].as_str().unwrap_or(""));
+        println!("pack written: {}", output.display());
+        print_token_report(&report);
+        println!("\nCACHE AUDIT");
+        println!(
+            "- stable prefix hash: {}",
+            stable_hash(&report.stable_prefix)
+        );
+        println!("- dynamic suffix placement: last");
+        println!("- provider strategy: {}", provider_cache_strategy(&report));
+        println!("\nNEXT");
+        println!("- {}", payload["next_command"].as_str().unwrap_or(""));
+        println!(
+            "- memory preflight --for {} \"{}\"",
+            payload["provider"].as_str().unwrap_or("generic"),
+            payload["task"].as_str().unwrap_or("")
+        );
+    }
+    Ok(())
+}
+
+fn ship_demo_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let json_output = cli_flag(rest, "--json");
+    let output = cli_flag_path(rest, "--output")
+        .unwrap_or_else(|| PathBuf::from(".memory.cpp/reports/demo/ship-demo.md"));
+    demo_multi_model_command(engine, None, None, json_output)?;
+    let mut out = String::new();
+    out.push_str("# memory.cpp ship demo\n\n");
+    out.push_str("This local demo is deterministic and does not call external APIs.\n\n");
+    out.push_str("## Run path\n");
+    out.push_str("1. `memory demo multi-model`\n");
+    out.push_str("2. `memory doctor \"fix the billing export bug\" --provider openai`\n");
+    out.push_str("3. `memory pack \"fix the billing export bug\" --for codex --budget 1500`\n");
+    out.push_str("4. `memory agents-score`\n");
+    out.push_str("5. `memory bench`\n\n");
+    out.push_str("## Demo promise\n");
+    out.push_str("- token waste is visible\n- KV pressure is estimated\n- provider packs are generated\n- no network is required\n");
+    write_public_artifact(&output, &out, true)?;
+    println!("ship demo: {}", output.display());
+    Ok(())
+}
+
+fn mcp_scan_command(rest: &[String]) -> Result<()> {
+    let json_output = cli_flag(rest, "--json");
+    let cwd = env::current_dir()?;
+    let paths = [
+        cwd.join(".cursor").join("mcp.json"),
+        cwd.join(".gemini").join("mcp.json"),
+        cwd.join(".memory.cpp").join("attach").join("mcp.json"),
+        cwd.join("claude_desktop_config.json"),
+    ];
+    let mut findings = Vec::new();
+    for path in paths {
+        if !path.exists() {
+            continue;
+        }
+        let text = fs::read_to_string(&path).unwrap_or_default();
+        let lower = text.to_ascii_lowercase();
+        let mut risks = Vec::new();
+        if lower.contains("write") || lower.contains("delete") || lower.contains("shell") {
+            risks.push("write-capable or shell-like tool wording");
+        }
+        if lower.contains("token") || lower.contains("secret") || lower.contains("apikey") {
+            risks.push("secret-like config wording");
+        }
+        if !lower.contains("read") {
+            risks.push("read-only intent not obvious");
+        }
+        findings.push(json!({
+            "path": path.display().to_string(),
+            "risk_count": risks.len(),
+            "risks": risks,
+        }));
+    }
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&findings)?);
+    } else {
+        println!("MCP SCAN");
+        if findings.is_empty() {
+            println!("No local MCP config files found in common project locations.");
+        }
+        for finding in &findings {
+            println!("- {}", finding["path"].as_str().unwrap_or(""));
+            for risk in finding["risks"].as_array().into_iter().flatten() {
+                println!("  risk: {}", risk.as_str().unwrap_or(""));
+            }
+            if finding["risk_count"].as_u64().unwrap_or(0) == 0 {
+                println!("  risk: none obvious");
+            }
+        }
+        println!("fix: memory mcp-harden --dry-run");
+    }
+    Ok(())
+}
+
+fn mcp_harden_command(rest: &[String]) -> Result<()> {
+    let apply = cli_flag(rest, "--apply");
+    let dry_run = cli_flag(rest, "--dry-run") || !apply;
+    let output = cli_flag_path(rest, "--output")
+        .unwrap_or_else(|| PathBuf::from(".memory.cpp/mcp-policy.json"));
+    let policy = json!({
+        "memory_cpp_mcp_policy": {
+            "default_mode": "read-only",
+            "write_tools": "disabled unless explicitly approved",
+            "resources": [
+                "memory://status",
+                "memory://pack/latest",
+                "memory://doctor/latest",
+                "memory://rules",
+                "memory://mistakes",
+                "memory://profile",
+                "memory://project-state",
+                "memory://runtime-plan"
+            ],
+            "local_only": true
+        }
+    });
+    if dry_run {
+        println!("MCP HARDEN DRY RUN");
+        println!("would write: {}", output.display());
+        println!("{}", serde_json::to_string_pretty(&policy)?);
+        println!("apply with: memory mcp-harden --apply");
+    } else {
+        write_public_artifact(&output, &serde_json::to_string_pretty(&policy)?, true)?;
+        println!("MCP hardening policy written: {}", output.display());
+    }
+    Ok(())
+}
+
+fn sign_command(rest: &[String]) -> Result<()> {
+    let root = cli_flag_path(rest, "--root").unwrap_or_else(|| PathBuf::from(".memory.cpp"));
+    let output = cli_flag_path(rest, "--output")
+        .unwrap_or_else(|| root.join("signatures").join("manifest.json"));
+    let mut files = Vec::new();
+    collect_signable_files(&root, &mut files)?;
+    if Path::new("AGENTS.md").exists() {
+        files.push(PathBuf::from("AGENTS.md"));
+    }
+    if Path::new("GEMINI.md").exists() {
+        files.push(PathBuf::from("GEMINI.md"));
+    }
+    files.sort();
+    files.dedup();
+    let entries = files
+        .iter()
+        .filter_map(|path| {
+            fs::read(path).ok().map(|bytes| {
+                json!({
+                    "path": path.display().to_string(),
+                    "hash": stable_hash_bytes(&bytes),
+                    "bytes": bytes.len(),
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    let manifest = json!({
+        "format": "memory.cpp local artifact manifest v1",
+        "generated_at": Utc::now().to_rfc3339(),
+        "signature_note": "Local integrity hash metadata only; no cloud signing or external key service.",
+        "entries": entries,
+    });
+    write_public_artifact(&output, &serde_json::to_string_pretty(&manifest)?, true)?;
+    println!("signature manifest: {}", output.display());
+    println!(
+        "entries: {}",
+        manifest["entries"].as_array().map(Vec::len).unwrap_or(0)
+    );
+    Ok(())
+}
+
+fn verify_command(rest: &[String]) -> Result<()> {
+    let manifest_path = cli_flag_path(rest, "--manifest")
+        .unwrap_or_else(|| PathBuf::from(".memory.cpp/signatures/manifest.json"));
+    let text = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("failed to read {}", manifest_path.display()))?;
+    let manifest: Value = serde_json::from_str(&text)?;
+    let mut ok = 0usize;
+    let mut failed = 0usize;
+    for entry in manifest["entries"].as_array().into_iter().flatten() {
+        let Some(path) = entry["path"].as_str() else {
+            failed += 1;
+            continue;
+        };
+        let expected = entry["hash"].as_str().unwrap_or("");
+        match fs::read(path) {
+            Ok(bytes) if stable_hash_bytes(&bytes) == expected => ok += 1,
+            _ => failed += 1,
+        }
+    }
+    println!("VERIFY");
+    println!("manifest: {}", manifest_path.display());
+    println!("ok: {ok}");
+    println!("failed: {failed}");
+    if failed > 0 {
+        return Err(anyhow!("artifact verification failed for {failed} entries"));
+    }
+    Ok(())
+}
+
+fn pr_shortcut_command(engine: &MemoryEngine, action: &str, rest: &[String]) -> Result<()> {
+    let mut forwarded = vec![action.to_string()];
+    forwarded.extend(rest.iter().cloned());
+    pr_command(engine, &forwarded)
+}
+
+fn git_learn_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let since = cli_flag_value(rest, "--since").unwrap_or_else(|| "HEAD~5".to_string());
+    let dry_run = cli_flag(rest, "--dry-run");
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let log = if git_repo_root(&repo_root).is_some() {
+        git_stdout(
+            &repo_root,
+            &["log", "--oneline", "--max-count", "20", &since, "--"],
+        )
+        .unwrap_or_else(|_| String::new())
+    } else {
+        String::new()
+    };
+    let summary = if log.trim().is_empty() {
+        format!("No git commits learned from {since}; run inside a repo with history.")
+    } else {
+        format!(
+            "Git learning since {since}: {}",
+            log.lines().take(5).collect::<Vec<_>>().join("; ")
+        )
+    };
+    println!("memory git-learn");
+    println!("{summary}");
+    if dry_run {
+        println!("dry-run: no candidate created");
+        return Ok(());
+    }
+    let workspace = current_workspace_name(engine)?.unwrap_or_else(|| "default".to_string());
+    let memory = NewMemory::new(summary)
+        .scope(workspace)
+        .kind("decision")
+        .confidence(0.68)
+        .tag("git-learn")
+        .tag("project_state")
+        .metadata(json!({"source": "git-learn", "since": since}));
+    match engine.remember_candidate(memory, "git-learn summarized recent commits")? {
+        Some(stored) => println!("candidate memory: {}", stored.id),
+        None => println!("candidate rejected by local policy"),
+    }
+    Ok(())
+}
+
+fn branch_summary_command(rest: &[String]) -> Result<()> {
+    let base = cli_flag_value(rest, "--base").unwrap_or_else(|| "main".to_string());
+    let output = cli_flag_path(rest, "--output");
+    let repo_root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let branch = git_stdout(&repo_root, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .unwrap_or_else(|_| "unknown".to_string());
+    let diff = git_stdout(&repo_root, &["diff", "--stat", &format!("{base}...HEAD")])
+        .unwrap_or_else(|_| "No diff stat available.".to_string());
+    let log = git_stdout(
+        &repo_root,
+        &[
+            "log",
+            "--oneline",
+            "--max-count",
+            "12",
+            &format!("{base}..HEAD"),
+        ],
+    )
+    .unwrap_or_else(|_| "No branch commits found.".to_string());
+    let mut out = String::new();
+    out.push_str("# Branch summary\n\n");
+    out.push_str(&format!("Branch: `{}`\nBase: `{base}`\n\n", branch.trim()));
+    out.push_str("## Commits\n");
+    for line in log.lines() {
+        out.push_str(&format!("- {line}\n"));
+    }
+    out.push_str("\n## Diff stat\n\n```text\n");
+    out.push_str(diff.trim());
+    out.push_str("\n```\n\n## Next\n- Run `memory pr-comment --base ");
+    out.push_str(&base);
+    out.push_str(" --output .memory.cpp/pr-comment.md`.\n");
+    if let Some(path) = output.as_deref() {
+        write_public_artifact(path, &out, true)?;
+        println!("branch summary: {}", path.display());
+    } else {
+        println!("{out}");
+    }
     Ok(())
 }
 
@@ -19114,6 +19623,17 @@ mod tests {
             "badge",
             "recipe",
             "preflight",
+            "wow",
+            "autopilot",
+            "ship-demo",
+            "mcp-scan",
+            "mcp-harden",
+            "sign",
+            "verify",
+            "pr-comment",
+            "pr-context",
+            "git-learn",
+            "branch-summary",
             "show-map",
             "show-brain",
             "show-timeline",

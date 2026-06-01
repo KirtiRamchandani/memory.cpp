@@ -100,6 +100,16 @@ The main goal of `memory.cpp` is to make a software repository explainable and r
 | `memory trace compress --file agent-log.txt` | Turn a noisy tool trace into a small reusable summary. |
 | `memory trace-rollup --from agent-log.json --every 50` | Roll long-running agent sessions into compact state. |
 | `memory mistake "Use pnpm only. Never npm."` | Store a local mistake-firewall rule for future context packs. |
+| `memory explain-compile "fix checkout bug"` | Show why context was included or excluded. |
+| `memory memories list` | Inspect the local memory vault. |
+| `memory profile update "Prefers short PR summaries"` | Build local user/app/agent profile memory. |
+| `memory ask "what broke last time billing changed?"` | Answer from local memory with evidence IDs. |
+| `memory warnings "change auth flow"` | Show stale memories, secrets, and prior risks for a task. |
+| `memory flight start --goal "fix checkout bug" --tool codex` | Start a local AI work-session recorder. |
+| `memory context-diff latest previous` | Diff generated context packs like code. |
+| `memory agents-score --for codex` | Score how ready the repo is for AI coding tools. |
+| `memory trust-report` | Audit active, stale, low-confidence, and evidence-free memories. |
+| `memory roi --input-cost 2.50` | Estimate approximate token-cost avoidance from local savings logs. |
 | `memory map --type evolution --output html` | Generate a project evolution map. |
 | `memory map why "SQLite storage"` | Explain why a node or decision exists. |
 | `memory inbox review` | Approve, edit, or reject candidate memories. |
@@ -149,6 +159,7 @@ memory runtime-plan "fix checkout bug" --runtime llama.cpp
 memory trace compress --file examples/agent-log.txt
 memory trace-rollup --from tests/fixtures/inference/agent_trace_long.json --every 50
 memory doctor "add CSV export" --provider gemini
+memory demo multi-model
 ```
 
 What just happened: `memory.cpp` selected high-signal local memory, excluded stale or duplicated context, redacted secret-like material, and printed a provider-aware prompt layout.
@@ -169,6 +180,49 @@ Important honesty note: `memory.cpp` does not directly compress a provider's KV 
 `memory doctor "<task>" --provider openai` now includes an `Inference Cost Stack` with raw context tokens, compiled context tokens, fresh suffix tokens, cacheable prefix tokens, omitted tokens, estimated prefill reduction, estimated KV positions avoided, signal density, duplicate/stale tokens blocked, compressed tool trace tokens, provider cache strategy, and runtime strategy.
 
 See [Inference bottlenecks](docs/inference-bottlenecks.md) for fixtures, command examples, and the exact output shapes.
+
+## Local context control plane
+
+The linked product goal is bigger than one feature: `memory.cpp` should feel like a local-first control plane for AI context. This release now exposes deterministic, local command surfaces for the major layers without adding cloud accounts, telemetry, or fragile new storage systems.
+
+```bash
+memory memories list
+memory profile show --scope user
+memory explain-compile "fix checkout bug" --provider openai
+memory trust-report
+memory flight start --goal "fix checkout bug" --tool codex
+memory ask "what broke last time checkout changed?"
+memory warnings "change auth flow"
+memory context-diff latest previous
+memory ingest file README.md
+memory shared-context export
+memory heatmap --html
+memory agents-score --for codex
+memory badge --for codex
+memory recipe list
+memory roi --input-cost 2.50
+memory docs search "context compiler"
+memory examples run billing-export
+```
+
+What just happened: memory.cpp kept the data local, reused the existing memories/events/workspaces/inbox/provenance model, and added inspectable reports for memory vaults, profile memory, pack explainability, cache stability, trust, flight recording, context tests, proactive warnings, shared context, static reports, agent readiness, recipes, and approximate ROI.
+
+### Offline demo paths
+
+```bash
+memory demo multi-model
+memory pack "fix checkout bug" --for gemini --budget 1500
+memory pack "fix checkout bug" --for mcp --budget 1500
+memory attach gemini --dry-run
+memory attach mcp --dry-run
+memory docs list
+memory docs summarize
+memory docs search "provider cache"
+memory examples list
+memory examples run coding-agent
+```
+
+What just happened: the demo creates provider-specific packs, doctor JSON, benchmark JSON, and an HTML report under `.memory.cpp/demo/` without network calls or accounts.
 
 ## Project maps and time machine
 
@@ -250,6 +304,11 @@ Start here:
 - [AI context packs](docs/context-packs.md)
 - [Context compiler and token firewall](docs/context-compiler.md)
 - [Inference bottlenecks](docs/inference-bottlenecks.md)
+- [Providers](docs/providers.md)
+- [Advanced usage](docs/advanced.md)
+- [API surface](docs/api.md)
+- [Competitive positioning](docs/competitive-positioning.md)
+- [Demo script](docs/demo-script.md)
 - [Integrations](docs/integrations/cursor.md)
 - [Maps](docs/maps.md)
 - [Shareable artifacts](docs/share.md)

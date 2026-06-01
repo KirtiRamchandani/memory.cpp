@@ -141,8 +141,10 @@ enum ExportFormat {
 enum AttachTarget {
     Cursor,
     Claude,
+    Gemini,
     Codex,
     Continue,
+    Mcp,
     Ollama,
     Vscode,
     All,
@@ -1751,7 +1753,7 @@ struct ManualMcpCli {
 
 #[derive(Debug, Parser)]
 struct ManualDemoCli {
-    #[arg(default_value = "seed", value_parser = ["seed", "reset"])]
+    #[arg(default_value = "seed", value_parser = ["seed", "reset", "multi-model"])]
     action: String,
     #[arg(long)]
     workspace: Option<String>,
@@ -2034,6 +2036,8 @@ struct ManualExplainCli {
 #[derive(Debug, Parser)]
 struct ManualExamplesCli {
     area: Option<String>,
+    #[arg(trailing_var_arg = true)]
+    rest: Vec<String>,
     #[arg(long)]
     json: bool,
 }
@@ -2709,7 +2713,7 @@ fn print_extended_help() -> Result<()> {
     println!(
         "  map impact <topic>              Show affected files, commands, tests, docs, and risks"
     );
-    println!("  attach cursor|claude|codex|ollama");
+    println!("  attach cursor|claude|gemini|codex|mcp|ollama|all");
     println!("  proxy --learn --approval-required");
     println!("  mcp                             Read-only, redacted MCP server by default");
     println!("  embeddings status|list|set|migrate");
@@ -3151,7 +3155,7 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
             let args = ManualExamplesCli::parse_from(
                 std::iter::once(command.clone()).chain(rest.iter().cloned()),
             );
-            examples_command(args.area.as_deref(), args.json)?;
+            examples_command(args.area.as_deref(), &args.rest, args.json)?;
         }
         "welcome" => {
             let engine = build_engine_from_options(&options)?;
@@ -3584,6 +3588,12 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
                     args.json,
                 )?,
                 "reset" => demo_reset_command(
+                    &engine,
+                    args.workspace.as_ref(),
+                    args.path.as_ref(),
+                    args.json,
+                )?,
+                "multi-model" => demo_multi_model_command(
                     &engine,
                     args.workspace.as_ref(),
                     args.path.as_ref(),
@@ -7151,9 +7161,43 @@ fn suggest_explain_topics(topic: &str) -> Vec<&'static str> {
         .collect()
 }
 
-fn examples_command(area: Option<&str>, json_output: bool) -> Result<()> {
+fn examples_command(area: Option<&str>, rest: &[String], json_output: bool) -> Result<()> {
     let area = area.unwrap_or("all").to_ascii_lowercase();
     let workflows = example_workflows();
+    if area == "list" {
+        let list = workflows
+            .iter()
+            .map(|workflow| {
+                json!({
+                    "area": workflow["area"],
+                    "title": workflow["title"],
+                    "run": format!("memory examples run {}", workflow["area"].as_str().unwrap_or("dev")),
+                })
+            })
+            .collect::<Vec<_>>();
+        if json_output {
+            println!("{}", serde_json::to_string_pretty(&list)?);
+        } else {
+            println!("memory.cpp examples");
+            for item in list {
+                println!(
+                    "- {}: {}",
+                    item["area"].as_str().unwrap_or("example"),
+                    item["title"].as_str().unwrap_or("workflow")
+                );
+                println!("  run: {}", item["run"].as_str().unwrap_or(""));
+            }
+        }
+        return Ok(());
+    }
+    if area == "run" {
+        let example = rest
+            .iter()
+            .find(|value| !value.starts_with("--"))
+            .map(String::as_str)
+            .unwrap_or("coding-agent");
+        return run_example_workflow(example, json_output);
+    }
     let selected = workflows
         .iter()
         .filter(|workflow| area == "all" || workflow["area"].as_str() == Some(area.as_str()))
@@ -7178,6 +7222,55 @@ fn examples_command(area: Option<&str>, json_output: bool) -> Result<()> {
             }
             println!();
         }
+    }
+    Ok(())
+}
+
+fn run_example_workflow(name: &str, json_output: bool) -> Result<()> {
+    let normalized = name.trim().to_ascii_lowercase();
+    let commands = match normalized.as_str() {
+        "billing-export" => vec![
+            "memory demo seed",
+            "memory mistake \"Run billing export tests before changing export code.\"",
+            "memory pack \"fix the billing export bug\" --for codex --budget 1500",
+            "memory doctor \"fix the billing export bug\" --provider openai",
+            "memory bench",
+        ],
+        "support-agent" => vec![
+            "memory remember \"Support replies must cite source docs.\" --scope app --type rule",
+            "memory ingest docs docs",
+            "memory pack \"answer support ticket\" --for generic --budget 1500",
+            "memory warnings \"answer support ticket\"",
+        ],
+        "coding-agent" | "dev" => vec![
+            "memory demo seed",
+            "memory dev morning",
+            "memory pack \"fix checkout bug\" --for codex --budget 1500",
+            "memory preflight --for codex \"fix checkout bug\"",
+            "memory agents-score",
+        ],
+        other => {
+            println!("unknown example: {other}");
+            println!("try: memory examples list");
+            return Ok(());
+        }
+    };
+    let report = json!({
+        "example": normalized,
+        "offline": true,
+        "commands": commands,
+        "note": "This prints a deterministic run plan. Execute the commands when you want the demo artifacts."
+    });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("EXAMPLE {}", report["example"].as_str().unwrap_or("demo"));
+        println!("offline: yes");
+        println!("commands:");
+        for command in report["commands"].as_array().into_iter().flatten() {
+            println!("  {}", command.as_str().unwrap_or(""));
+        }
+        println!("what happens: memory.cpp seeds local memory, compiles a compact pack, audits context waste, and reports agent readiness.");
     }
     Ok(())
 }
@@ -7821,9 +7914,11 @@ fn expand_attach_targets(target: &AttachTarget) -> Vec<AttachTarget> {
         AttachTarget::All => vec![
             AttachTarget::Cursor,
             AttachTarget::Claude,
+            AttachTarget::Gemini,
             AttachTarget::Vscode,
             AttachTarget::Codex,
             AttachTarget::Continue,
+            AttachTarget::Mcp,
             AttachTarget::Ollama,
         ],
         other => vec![other.clone()],
@@ -7835,8 +7930,10 @@ fn attach_config_path(root: &Path, target: &AttachTarget) -> Result<PathBuf> {
         AttachTarget::Cursor => root.join(".cursor").join("mcp.json"),
         AttachTarget::Vscode => root.join(".vscode").join("mcp.json"),
         AttachTarget::Codex => root.join(".codex").join("mcp.json"),
+        AttachTarget::Gemini => root.join(".gemini").join("mcp.json"),
         AttachTarget::Claude => root.join(".claude").join("claude_desktop_config.json"),
         AttachTarget::Continue => root.join(".continue").join("mcp.json"),
+        AttachTarget::Mcp => root.join(".memory.cpp").join("attach").join("mcp.json"),
         AttachTarget::Ollama => root
             .join(".memory.cpp")
             .join("attach")
@@ -10604,6 +10701,8 @@ fn inference_cost_stack_json(report: &AiContextReport, runtime: &str) -> Value {
         "duplicate_context_tokens_blocked": report.duplicate_blocked_tokens,
         "stale_context_tokens_blocked": report.stale_blocked_tokens,
         "tool_trace_tokens_compressed": report.tool_bloat_blocked_tokens,
+        "secret_like_strings_blocked": report.secret_like_blocks,
+        "prompt_injection_warnings": report.prompt_injection_warnings,
         "provider_cache_strategy": provider_cache_strategy(report),
         "runtime_strategy": runtime_strategy_text(runtime),
     })
@@ -10643,6 +10742,14 @@ fn print_inference_cost_stack(report: &AiContextReport, runtime: &str) {
     println!(
         "tool_trace_tokens_compressed: {}",
         stack["tool_trace_tokens_compressed"]
+    );
+    println!(
+        "secret_like_strings_blocked: {}",
+        stack["secret_like_strings_blocked"]
+    );
+    println!(
+        "prompt_injection_warnings: {}",
+        stack["prompt_injection_warnings"]
     );
     println!(
         "provider_cache_strategy: {}",
@@ -12391,10 +12498,9 @@ fn review_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
             for item in engine.inbox(None, Some("pending"))? {
                 if inbox_candidate_confidence(&item) >= 0.9
                     && inbox_candidate_sensitivity(&item) == "low"
+                    && approve_inbox_item(engine, &item.id, true)?.is_some()
                 {
-                    if approve_inbox_item(engine, &item.id, true)?.is_some() {
-                        approved += 1;
-                    }
+                    approved += 1;
                 }
             }
             println!("approved {approved} safe candidate(s)");
@@ -12549,11 +12655,11 @@ fn context_diff_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
     );
     println!("added context:");
     for line in left_lines.difference(&right_lines).take(20) {
-        println!("- {}", redact_line(*line));
+        println!("- {}", redact_line(line));
     }
     println!("removed context:");
     for line in right_lines.difference(&left_lines).take(20) {
-        println!("- {}", redact_line(*line));
+        println!("- {}", redact_line(line));
     }
     Ok(())
 }
@@ -13042,6 +13148,79 @@ fn docs_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
         .filter(|value| !value.starts_with("--"))
         .map(String::as_str)
         .unwrap_or("generate");
+    match action {
+        "list" => {
+            let docs = generated_memory_docs(engine)?;
+            if cli_flag(rest, "--json") {
+                let items = docs
+                    .iter()
+                    .map(|(name, body)| {
+                        json!({
+                            "name": name,
+                            "token_estimate": estimate_tokens(body),
+                            "generated": true,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                println!("{}", serde_json::to_string_pretty(&items)?);
+            } else {
+                println!("memory docs");
+                for (name, body) in docs {
+                    println!("- {name} (~{} tokens)", estimate_tokens(&body));
+                }
+                println!("next: memory docs generate --apply");
+            }
+            return Ok(());
+        }
+        "summarize" => {
+            println!("memory docs summary");
+            for (name, body) in generated_memory_docs(engine)? {
+                let brief = body
+                    .lines()
+                    .find(|line| !line.trim().is_empty() && !line.starts_with('#'))
+                    .unwrap_or("Generated from local memory.");
+                println!("- {name}: {}", truncate_detail(brief, 120));
+            }
+            println!("local-only: yes");
+            return Ok(());
+        }
+        "search" => {
+            let query = rest
+                .iter()
+                .skip(1)
+                .filter(|value| !value.starts_with("--"))
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" ");
+            let query = if query.trim().is_empty() {
+                "memory context".to_string()
+            } else {
+                query
+            };
+            let hits = search_docs_files(Path::new("docs"), &query, 12)?;
+            if cli_flag(rest, "--json") {
+                println!("{}", serde_json::to_string_pretty(&hits)?);
+            } else {
+                println!("memory docs search: {query}");
+                if hits.is_empty() {
+                    println!(
+                        "not found in docs/. Try `memory ingest docs docs` to store docs memory."
+                    );
+                } else {
+                    for hit in hits {
+                        println!(
+                            "- {}:{} {}",
+                            hit["path"].as_str().unwrap_or("docs"),
+                            hit["line"].as_u64().unwrap_or(0),
+                            hit["text"].as_str().unwrap_or("")
+                        );
+                    }
+                }
+            }
+            return Ok(());
+        }
+        _ => {}
+    }
     let apply = cli_flag(rest, "--apply");
     let dry_run = cli_flag(rest, "--dry-run") || !apply;
     let output_dir =
@@ -13064,6 +13243,61 @@ fn docs_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
     }
     println!("generated memory docs under {}", output_dir.display());
     println!("next: git diff -- docs/memory");
+    Ok(())
+}
+
+fn search_docs_files(root: &Path, query: &str, limit: usize) -> Result<Vec<Value>> {
+    let mut hits = Vec::new();
+    let words = query
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    collect_text_hits(root, root, &words, limit, &mut hits)?;
+    Ok(hits)
+}
+
+fn collect_text_hits(
+    root: &Path,
+    current: &Path,
+    words: &[String],
+    limit: usize,
+    hits: &mut Vec<Value>,
+) -> Result<()> {
+    if hits.len() >= limit || !current.exists() {
+        return Ok(());
+    }
+    if current.is_dir() {
+        for entry in fs::read_dir(current)? {
+            collect_text_hits(root, &entry?.path(), words, limit, hits)?;
+            if hits.len() >= limit {
+                break;
+            }
+        }
+        return Ok(());
+    }
+    let extension = current
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !matches!(extension.as_str(), "md" | "txt" | "json" | "toml" | "rs") {
+        return Ok(());
+    }
+    let text = fs::read_to_string(current).unwrap_or_default();
+    for (index, line) in text.lines().enumerate() {
+        let lower = line.to_ascii_lowercase();
+        if words.iter().all(|word| lower.contains(word)) {
+            hits.push(json!({
+                "path": current.strip_prefix(root).unwrap_or(current).display().to_string(),
+                "line": index + 1,
+                "text": truncate_detail(line.trim(), 180),
+            }));
+            if hits.len() >= limit {
+                break;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -16326,6 +16560,111 @@ fn demo_reset_command(
     Ok(())
 }
 
+fn demo_multi_model_command(
+    engine: &MemoryEngine,
+    workspace: Option<&String>,
+    path: Option<&PathBuf>,
+    json_output: bool,
+) -> Result<()> {
+    demo_seed_command(engine, workspace, path, true)?;
+    let task = "fix the billing export bug";
+    let base = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("demo")
+        .join("multi-model");
+    fs::create_dir_all(&base)?;
+
+    let mut files = Vec::new();
+    for target in [
+        "generic", "codex", "claude", "gemini", "cursor", "continue", "mcp",
+    ] {
+        let report = build_ai_context_report(engine, task, target, 1500, workspace.cloned())?;
+        let body = provider_pack_body(target, &report);
+        let path = base.join(format!("{target}-pack.md"));
+        write_public_artifact(&path, &body, true)?;
+        files.push(json!({
+            "target": target,
+            "path": path.display().to_string(),
+            "compiled_tokens": report.compiled_tokens,
+            "estimated_kv_positions_avoided": report.kv_positions_avoided(),
+            "stable_prefix_hash": stable_hash(&report.stable_prefix),
+        }));
+        record_savings_report(engine, &report)?;
+    }
+
+    let doctor_report = build_ai_context_report(engine, task, "openai", 1500, workspace.cloned())?;
+    let doctor_path = base.join("doctor.json");
+    write_public_artifact(
+        &doctor_path,
+        &serde_json::to_string_pretty(&json!({
+            "task": task,
+            "inference_cost_stack": inference_cost_stack_json(&doctor_report, "generic"),
+            "local_only": true,
+        }))?,
+        true,
+    )?;
+    let bench_path = base.join("benchmark.json");
+    write_public_artifact(
+        &bench_path,
+        &serde_json::to_string_pretty(&json!({
+            "scenario": "multi-model pack generation",
+            "raw_tokens": doctor_report.raw_tokens,
+            "final_tokens": doctor_report.compiled_tokens,
+            "reduction_percent": format!("{:.1}", doctor_report.reduction_percent()),
+            "pass": doctor_report.compiled_tokens <= 1500,
+        }))?,
+        true,
+    )?;
+    let html_path = base.join("report.html");
+    write_public_artifact(
+        &html_path,
+        &simple_html_page(
+            "memory.cpp multi-model demo",
+            "Generated provider packs, doctor JSON, benchmark JSON, and an offline HTML report.",
+        ),
+        true,
+    )?;
+
+    let report = json!({
+        "task": task,
+        "directory": base.display().to_string(),
+        "packs": files,
+        "doctor_json": doctor_path.display().to_string(),
+        "benchmark_json": bench_path.display().to_string(),
+        "html_report": html_path.display().to_string(),
+        "offline": true,
+    });
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("multi-model demo generated");
+        println!("directory: {}", report["directory"].as_str().unwrap_or(""));
+        for item in report["packs"].as_array().into_iter().flatten() {
+            println!(
+                "- {} pack: {}",
+                item["target"].as_str().unwrap_or("target"),
+                item["path"].as_str().unwrap_or("")
+            );
+        }
+        println!(
+            "doctor JSON: {}",
+            report["doctor_json"].as_str().unwrap_or("")
+        );
+        println!(
+            "benchmark JSON: {}",
+            report["benchmark_json"].as_str().unwrap_or("")
+        );
+        println!(
+            "HTML report: {}",
+            report["html_report"].as_str().unwrap_or("")
+        );
+        println!("local-only: yes");
+    }
+    Ok(())
+}
+
 fn doctor_command(
     engine: &MemoryEngine,
     options: &EngineOptions,
@@ -19357,6 +19696,14 @@ mod tests {
         assert!(attach.dry_run);
         assert!(attach.print_config);
 
+        let gemini_attach = ManualAttachCli::try_parse_from(["attach", "gemini", "--dry-run"])
+            .expect("gemini attach parse should succeed");
+        assert!(matches!(gemini_attach.target, AttachTarget::Gemini));
+
+        let mcp_attach = ManualAttachCli::try_parse_from(["attach", "mcp", "--dry-run"])
+            .expect("mcp attach parse should succeed");
+        assert!(matches!(mcp_attach.target, AttachTarget::Mcp));
+
         let detach = ManualDetachCli::try_parse_from(["detach", "all", "--dry-run"])
             .expect("detach parse should succeed");
         assert!(matches!(detach.target, AttachTarget::All));
@@ -19408,6 +19755,15 @@ mod tests {
             "cursor".to_string(),
         ];
         assert_eq!(first_positional_after_action(&rest), Some("cursor"));
+
+        let examples = ManualExamplesCli::try_parse_from(["examples", "run", "billing-export"])
+            .expect("examples run parse should succeed");
+        assert_eq!(examples.area.as_deref(), Some("run"));
+        assert_eq!(examples.rest, vec!["billing-export".to_string()]);
+
+        let demo = ManualDemoCli::try_parse_from(["demo", "multi-model"])
+            .expect("demo multi-model parse should succeed");
+        assert_eq!(demo.action, "multi-model");
     }
 
     #[test]

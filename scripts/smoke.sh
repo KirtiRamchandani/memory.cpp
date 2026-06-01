@@ -14,8 +14,12 @@ DB_DIR="$REPO_ROOT/.memory.cpp/smoke"
 DB="$DB_DIR/memory.db"
 MAP_HTML="$DB_DIR/evolution.html"
 CI_LOG="$DB_DIR/ci.log"
+GENERIC_CONTEXT="$DB_DIR/generic-context.md"
+COMPILED_CONTEXT="$DB_DIR/compiled-context.md"
+SAFE_INGEST="$DB_DIR/safe-ingest.md"
 rm -rf "$DB_DIR"
 mkdir -p "$DB_DIR"
+printf '%s\n' 'Smoke ingest note: memory.cpp stores local project facts, commands, decisions, and next steps.' > "$SAFE_INGEST"
 
 "$SCRIPT_DIR/install.sh" --dry-run
 cargo run -p memory-cli -- --db "$DB" init --workspace smoke-demo
@@ -29,8 +33,11 @@ cargo run -p memory-cli -- --db "$DB" next --workspace smoke-demo
 cargo run -p memory-cli -- --db "$DB" status
 cargo run -p memory-cli -- --db "$DB" explain memory
 cargo run -p memory-cli -- --db "$DB" examples dev
+cargo run -p memory-cli -- --db "$DB" examples list
+cargo run -p memory-cli -- --db "$DB" examples run billing-export
 cargo run -p memory-cli -- --db "$DB" privacy status
 cargo run -p memory-cli -- --db "$DB" demo seed --workspace smoke-demo --path .
+cargo run -p memory-cli -- --db "$DB" demo multi-model --workspace smoke-demo --path .
 cargo run -p memory-cli -- --db "$DB" inbox stats --workspace smoke-demo
 cargo run -p memory-cli -- --db "$DB" inbox review --workspace smoke-demo
 cargo run -p memory-cli -- --db "$DB" inbox rules
@@ -40,14 +47,21 @@ cargo run -p memory-cli -- --db "$DB" dev morning --workspace smoke-demo
 cargo run -p memory-cli -- --db "$DB" dev explain-repo . --workspace smoke-demo
 cargo run -p memory-cli -- --db "$DB" dev next --workspace smoke-demo
 cargo run -p memory-cli -- --db "$DB" show-context
-cargo run -p memory-cli -- --db "$DB" context write --for generic --output "$DB_DIR/generic-context.md"
+cargo run -p memory-cli -- --db "$DB" context write --for generic --output "$GENERIC_CONTEXT"
 cargo run -p memory-cli -- --db "$DB" context status
+cargo run -p memory-cli -- --db "$DB" remember "Smoke profile prefers concise summaries." --scope user --type preference
+cargo run -p memory-cli -- --db "$DB" memories list --limit 5
+cargo run -p memory-cli -- --db "$DB" profile show --scope user
+cargo run -p memory-cli -- --db "$DB" profile update "Smoke user prefers local-first reports." --scope user
 cargo run -p memory-cli -- --db "$DB" mistake "Use cargo fmt before committing Rust changes."
 cargo run -p memory-cli -- --db "$DB" trace compress --file examples/agent-log.txt
 cargo run -p memory-cli -- --db "$DB" trace learn --file examples/agent-log.txt
-cargo run -p memory-cli -- --db "$DB" compile "fix checkout bug" --provider openai --budget 1500 --output "$DB_DIR/compiled-context.md"
+cargo run -p memory-cli -- --db "$DB" compile "fix checkout bug" --provider openai --budget 1500 --output "$COMPILED_CONTEXT"
+cargo run -p memory-cli -- --db "$DB" explain-compile "fix checkout bug" --provider openai
 cargo run -p memory-cli -- --db "$DB" token-firewall "fix checkout bug" --provider openai --budget 2000
 cargo run -p memory-cli -- --db "$DB" cache-plan "fix checkout bug" --provider claude
+cargo run -p memory-cli -- --db "$DB" cache-hash "fix checkout bug"
+cargo run -p memory-cli -- --db "$DB" cache-stability "fix checkout bug" --provider openai
 cargo run -p memory-cli -- --db "$DB" kv-report "fix checkout bug"
 cargo run -p memory-cli -- --db "$DB" prefill-report "fix checkout bug"
 cargo run -p memory-cli -- --db "$DB" kv-budget "fix checkout bug" --max-kv-tokens 4096
@@ -58,6 +72,37 @@ cargo run -p memory-cli -- --db "$DB" cache-audit --provider openai --file tests
 cargo run -p memory-cli -- --db "$DB" trace-rollup --from tests/fixtures/inference/agent_trace_long.json --every 50
 cargo run -p memory-cli -- --db "$DB" doctor "add CSV export" --provider gemini
 cargo run -p memory-cli -- --db "$DB" pack "fix checkout bug" --for generic --budget 1500 --output "$DB_DIR/generic-pack.md"
+cargo run -p memory-cli -- --db "$DB" pack "fix checkout bug" --for gemini --budget 1500 --output "$DB_DIR/gemini-pack.md"
+cargo run -p memory-cli -- --db "$DB" pack "fix checkout bug" --for mcp --budget 1500 --output "$DB_DIR/mcp-pack.md"
+cargo run -p memory-cli -- --db "$DB" explain-pack "$GENERIC_CONTEXT"
+cargo run -p memory-cli -- --db "$DB" context-diff "$GENERIC_CONTEXT" "$COMPILED_CONTEXT"
+cargo run -p memory-cli -- --db "$DB" blame --pack "$GENERIC_CONTEXT"
+cargo run -p memory-cli -- --db "$DB" ask "what broke last time checkout changed?"
+cargo run -p memory-cli -- --db "$DB" suggest "fix checkout bug"
+cargo run -p memory-cli -- --db "$DB" warnings "change auth flow"
+cargo run -p memory-cli -- --db "$DB" proactive --task "prepare release"
+cargo run -p memory-cli -- --db "$DB" trust-report
+cargo run -p memory-cli -- --db "$DB" redactions
+cargo run -p memory-cli -- --db "$DB" quarantine review
+cargo run -p memory-cli -- --db "$DB" review
+cargo run -p memory-cli -- --db "$DB" flight start --goal "fix checkout bug" --tool codex
+cargo run -p memory-cli -- --db "$DB" flight summarize
+cargo run -p memory-cli -- --db "$DB" flight stop
+cargo run -p memory-cli -- --db "$DB" test
+cargo run -p memory-cli -- --db "$DB" ci-check
+cargo run -p memory-cli -- --db "$DB" ingest file "$SAFE_INGEST"
+cargo run -p memory-cli -- --db "$DB" shared-context status
+cargo run -p memory-cli -- --db "$DB" shared-context export --output "$DB_DIR/shared-context.json"
+cargo run -p memory-cli -- --db "$DB" heatmap --html --output "$DB_DIR/heatmap.html"
+cargo run -p memory-cli -- --db "$DB" report --html --output "$DB_DIR/memory-report.html"
+cargo run -p memory-cli -- --db "$DB" dashboard --html --output "$DB_DIR/dashboard.html"
+cargo run -p memory-cli -- --db "$DB" agents-score --for codex
+cargo run -p memory-cli -- --db "$DB" badge --for codex
+cargo run -p memory-cli -- --db "$DB" recipe list
+cargo run -p memory-cli -- --db "$DB" recipe apply coding-agent
+cargo run -p memory-cli -- --db "$DB" preflight --for codex "fix checkout bug"
+cargo run -p memory-cli -- --db "$DB" roi --input-cost 2.50
+cargo run -p memory-cli -- --db "$DB" leaderboard
 cargo run -p memory-cli -- --db "$DB" mistakes
 cargo run -p memory-cli -- --db "$DB" stale
 cargo run -p memory-cli -- --db "$DB" conflicts
@@ -77,6 +122,8 @@ cargo run -p memory-cli -- --db "$DB" attach --print-config cursor
 cargo run -p memory-cli -- --db "$DB" attach status
 cargo run -p memory-cli -- --db "$DB" attach verify cursor --dry-run
 cargo run -p memory-cli -- --db "$DB" attach export-config cursor
+cargo run -p memory-cli -- --db "$DB" attach gemini --dry-run
+cargo run -p memory-cli -- --db "$DB" attach mcp --dry-run
 cargo run -p memory-cli -- --db "$DB" detach cursor --dry-run
 EXTRACT_PREVIEW="$(cargo run -q -p memory-cli -- --db "$DB" extract . --workspace smoke-demo --dry-run --limit 5 --json)"
 case "$EXTRACT_PREVIEW" in
@@ -114,6 +161,9 @@ cargo run -p memory-cli -- --db "$DB" map export-context
 cargo run -p memory-cli -- --db "$DB" share status --output "$DB_DIR/project-memory-summary.md"
 cargo run -p memory-cli -- --db "$DB" share map --output "$DB_DIR/project-evolution-map.html"
 cargo run -p memory-cli -- --db "$DB" docs generate --dry-run
+cargo run -p memory-cli -- --db "$DB" docs list
+cargo run -p memory-cli -- --db "$DB" docs summarize
+cargo run -p memory-cli -- --db "$DB" docs search context
 cargo run -p memory-cli -- --db "$DB" pr summary --base main --output "$DB_DIR/pr-summary.md"
 cargo run -p memory-cli -- --db "$DB" timeline week --output "$DB_DIR/repo-timeline.md"
 cargo run -p memory-cli -- --db "$DB" rewind last-week --output "$DB_DIR/rewind.md"

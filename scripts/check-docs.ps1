@@ -13,6 +13,8 @@ $required = @(
   'docs/release-hardening.md','docs/api-stability.md','docs/compatibility.md',
   'docs/limitations.md','docs/performance.md','docs/security.md',
   'docs/dogfooding.md','docs/release-process.md','docs/community.md',
+  'docs/providers.md','docs/advanced.md','docs/api.md','docs/demo-script.md',
+  'docs/competitive-positioning.md',
   'docs/recipes/optimize-ai-context.md','docs/recipes/avoid-repeat-ai-mistakes.md'
 )
 foreach ($file in $required) { if (-not (Test-Path $file)) { throw "missing $file" } }

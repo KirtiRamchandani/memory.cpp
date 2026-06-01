@@ -1,44 +1,26 @@
-# API
+# API surface
 
-The local HTTP surface is intentionally small and launch-oriented.
+The Rust crates are still pre-1.0. This document describes the intended stable surface for future SDK wrappers.
 
-## Runtime
+| Function | Status | CLI equivalent |
+| --- | --- | --- |
+| `compileContext(options)` | planned | `memory compile` |
+| `createContextPack(options)` | planned | `memory pack` |
+| `doctor(options)` | planned | `memory doctor` |
+| `estimatePrefill(options)` | planned | `memory prefill-report` |
+| `estimateKvPressure(options)` | planned | `memory kv-report` |
+| `calculateSignalDensity(options)` | planned | `memory signal-density` |
+| `planProviderCache(options)` | planned | `memory cache-plan` |
+| `auditProviderCache(options)` | planned | `memory cache-audit` |
+| `compressToolTrace(options)` | planned | `memory trace compress` |
+| `rollupTrace(options)` | planned | `memory trace-rollup` |
+| `recordMemory(options)` | planned | `memory remember` |
+| `recordMistake(options)` | planned | `memory mistake` |
+| `attachProvider(options)` | planned | `memory attach` |
+| `generateRuntimePlan(options)` | planned | `memory runtime-plan` |
+| `generateBatchPlan(options)` | planned | `memory batch-plan` |
+| `askMemory(options)` | planned | `memory ask` |
+| `testMemory(options)` | planned | `memory test` |
+| `scoreAgentReadiness(options)` | planned | `memory agents-score` |
 
-```bash
-memory --db .memory.cpp/memory.db start --workspace demo
-memory --db .memory.cpp/memory.db status
-memory --db .memory.cpp/memory.db stop
-```
-
-The runtime writes state under `.memory.cpp/runtime/`.
-
-## Endpoints
-
-### `GET /health`
-
-Basic health probe for the server or proxy.
-
-### `GET /v1/map`
-
-Returns a generated map payload from query parameters.
-
-### `POST /v1/map`
-
-Generates a map from a JSON request body.
-
-### `GET /dashboard/map`
-
-Dashboard-oriented map view.
-
-## MCP companion surface
-
-For agent integrations, the more important launch interface is MCP:
-
-- `memory_search`
-- `memory_context`
-- `memory_map`
-- `memory_timeline`
-- `memory_graph`
-- `memory_add_candidate`
-
-This split keeps the HTTP API small while the agent-facing safety model stays explicit and audited.
+Return shapes should include compiled prompt, stable prefix, fresh suffix, cache plan, KV report, prefill report, warnings, evidence, omitted context, and files written.

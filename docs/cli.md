@@ -96,6 +96,44 @@ memory resolve
 memory savings
 memory runtime-plan
 memory bench-context
+memory bench
+memory explain-compile
+memory roi
+memory leaderboard
+memory cache-hash
+memory cache-stability
+memory memories
+memory update-memory
+memory profile
+memory trust-report
+memory redactions
+memory evidence
+memory quarantine
+memory review
+memory flight
+memory context-diff
+memory blame
+memory explain-pack
+memory test
+memory ci-check
+memory ask
+memory suggest
+memory warnings
+memory proactive
+memory ingest
+memory shared-context
+memory heatmap
+memory report
+memory agents-score
+memory badge
+memory recipe
+memory preflight
+memory demo multi-model
+memory docs list
+memory docs summarize
+memory docs search
+memory examples list
+memory examples run <name>
 ```
 
 ## Most important workflows
@@ -195,12 +233,55 @@ memory trace compress --file examples/agent-log.txt
 memory mistake "Use pnpm only. Never npm."
 memory doctor "add CSV export" --provider gemini
 memory pack "fix checkout bug" --for codex --budget 1500
+memory pack "fix checkout bug" --for gemini --budget 1500
+memory pack "fix checkout bug" --for mcp --budget 1500
+memory demo multi-model
 memory savings
 ```
 
 These commands are local-first prompt hygiene tools. They compile smaller task context, report estimated prompt-side KV pressure avoided, improve signal density, group shared prefixes, and keep stale or risky memory out of AI prompts. They do not directly control provider KV caches or low-level serving kernels.
 
 `memory doctor "<task>" --provider <provider>` includes an `Inference Cost Stack` section with raw and compiled context tokens, fresh suffix tokens, cacheable prefix tokens, omitted tokens, estimated prefill reduction, KV positions avoided, signal density, duplicate/stale/tool-trace tokens blocked, provider cache strategy, and runtime strategy.
+
+### Local context control plane
+
+```bash
+memory remember "Use cargo test before release" --scope repo --type rule
+memory memories list
+memory memories show <memory_id>
+memory memories export --format json --output .memory.cpp/memories.json
+memory profile update "Prefers concise PR summaries" --scope user
+memory explain-compile "fix checkout bug" --provider openai
+memory ask "what broke last time checkout changed?"
+memory suggest "fix checkout bug"
+memory warnings "change auth flow"
+memory proactive --task "prepare release"
+memory trust-report
+memory redactions
+memory evidence <memory_id>
+memory quarantine review
+memory review
+memory flight start --goal "fix checkout bug" --tool codex
+memory flight summarize
+memory context-diff latest previous
+memory blame <memory_id>
+memory explain-pack latest
+memory test
+memory ci-check
+memory ingest file README.md
+memory shared-context export
+memory heatmap --html
+memory report --html
+memory dashboard --html
+memory agents-score --for codex
+memory badge --for codex
+memory recipe list
+memory preflight --for codex "fix checkout bug"
+memory roi --input-cost 2.50
+memory leaderboard
+```
+
+These commands intentionally use local memory, existing metadata, generated packs, and static reports. Huge future features such as hosted dashboards, cloud sync, or kernel-level runtime optimization are not enabled by these commands.
 
 ### Embeddings
 

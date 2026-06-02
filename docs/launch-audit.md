@@ -26,6 +26,7 @@ memory.cpp is a local-first AI memory and context control plane. It helps develo
 | No staged-release launch wording | README/docs/website avoid tentative launch framing; `memory embeddings explain` uses opt-in/local wording. |
 | One-command wow loop | `memory wow`, `memory autopilot`, and `memory ship-demo` are implemented in `crates/memory-cli/src/main.rs` and covered by `scripts/smoke.ps1` and `scripts/smoke.sh`. |
 | Public terminal demo artifacts | `scripts/demo-terminal.ps1` and `scripts/demo-terminal.sh` write deterministic terminal-demo artifacts under `.memory.cpp/reports/demo/` and detect optional recording tools without installing them. |
+| Fresh-clone built-binary proof | `scripts/fresh-clone-acceptance.ps1` and `scripts/fresh-clone-acceptance.sh` clone the committed repo, build `memory-cli`, and run the release acceptance loop from the built `memory` binary. Dry-run mode is smoke-covered. |
 | Universal memory vault | `remember`, `recall`, `forget`, `update-memory`, `memories`, and `profile` commands are implemented and smoke-covered. |
 | Context compiler | `compile`, `pack`, `explain-compile`, `token-firewall`, `kv-report`, `kv-budget`, `prefill-report`, and `signal-density` are implemented and smoke-covered. |
 | Provider packs | `pack --for generic/gemini/mcp` is smoke-covered; docs describe Codex, Claude, Gemini, Cursor, Continue, MCP, and generic packs. |
@@ -74,7 +75,7 @@ cargo run -p memory-cli -- --db "$DB" ...
 
 These are not blockers for the current local-first launch, but they are the next best proof upgrades:
 
-- Add a clean fresh-clone script that builds, runs `memory wow`, and archives the demo transcript.
+- Run the fresh-clone acceptance script against the public GitHub URL after every tagged release.
 - Add a rendered screenshot or GIF after the terminal-demo transcript is approved.
 - Add package-manager release notes for Homebrew or prebuilt binary distribution once release assets are published.
 - Add stronger fixture assertions around exact provider pack marker blocks for Codex and Gemini.

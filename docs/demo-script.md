@@ -49,3 +49,29 @@ Artifacts are written under `.memory.cpp/reports/demo/` by default:
 - `ship-demo.md`
 
 Optional VHS, asciinema, or agg recording tools are detected when present, but memory.cpp never installs them automatically.
+
+## Fresh-clone built-binary acceptance
+
+Use this when you want a stricter release proof than the source-run smoke scripts:
+
+```bash
+./scripts/fresh-clone-acceptance.sh --dry-run
+./scripts/fresh-clone-acceptance.sh
+```
+
+PowerShell:
+
+```powershell
+./scripts/fresh-clone-acceptance.ps1 -DryRun
+./scripts/fresh-clone-acceptance.ps1
+```
+
+What just happened: the script cloned the committed repository into a temporary work directory, built `memory-cli` once, then ran the acceptance loop from the built `memory` binary. It writes:
+
+- `acceptance-transcript.txt`
+- `doctor-openai.json`
+- `codex-pack.md`
+- `bench.json`
+- `summary.md`
+
+The attach-all step runs inside a sandbox folder so local editor or assistant config files are not written into the repo root.

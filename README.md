@@ -433,6 +433,22 @@ PowerShell:
 ./scripts/release-candidate.ps1
 ```
 
+Fresh-clone built-binary acceptance:
+
+```bash
+./scripts/fresh-clone-acceptance.sh --dry-run
+./scripts/fresh-clone-acceptance.sh
+```
+
+PowerShell:
+
+```powershell
+./scripts/fresh-clone-acceptance.ps1 -DryRun
+./scripts/fresh-clone-acceptance.ps1
+```
+
+This clones the committed repo, builds `memory-cli` once, then runs the public acceptance loop from `target/debug/memory` instead of `cargo run`.
+
 The GitHub CI matrix runs on Linux, macOS, and Windows.
 
 ## Security and privacy

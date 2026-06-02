@@ -14,7 +14,7 @@ required=(
   docs/limitations.md docs/performance.md docs/security.md
   docs/dogfooding.md docs/release-process.md docs/community.md
   docs/providers.md docs/advanced.md docs/api.md docs/demo-script.md
-  docs/competitive-positioning.md
+  docs/competitive-positioning.md docs/launch-audit.md
   docs/recipes/optimize-ai-context.md docs/recipes/avoid-repeat-ai-mistakes.md
 )
 for file in "${required[@]}"; do

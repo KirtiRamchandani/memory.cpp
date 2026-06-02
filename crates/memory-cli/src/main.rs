@@ -5681,9 +5681,9 @@ fn embeddings_command(
         EmbeddingsCommand::Explain => {
             println!("embedding providers");
             println!("hash: stable, tiny, offline, low-RAM default.");
-            println!("ollama: beta, local server required, useful when Ollama is already running.");
-            println!("openai: beta, OpenAI-compatible endpoint, opt-in API key.");
-            println!("fastembed/fastembed-onnx: experimental provider intent in this CLI; no bundled ONNX Runtime is claimed here.");
+            println!("ollama: opt-in local HTTP provider, useful when Ollama is already running.");
+            println!("openai: opt-in OpenAI-compatible endpoint using an explicit API key.");
+            println!("fastembed/fastembed-onnx: local provider intent in this CLI; no bundled ONNX Runtime is claimed here.");
             println!("try: memory embeddings status");
         }
     }

@@ -4,7 +4,7 @@
 ![Release](https://github.com/KirtiRamchandani/memory.cpp/actions/workflows/release.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
-[Quick start](docs/quickstart.md) / [Install](docs/install.md) / [CLI](docs/cli.md) / [AI context](docs/context-packs.md) / [Context compiler](docs/context-compiler.md) / [Inference bottlenecks](docs/inference-bottlenecks.md) / [Maps](docs/maps.md) / [Safety](docs/safety.md) / [Roadmap](docs/roadmap.md)
+[Quick start](docs/quickstart.md) / [Install](docs/install.md) / [CLI](docs/cli.md) / [AI context](docs/context-packs.md) / [Context compiler](docs/context-compiler.md) / [Inference bottlenecks](docs/inference-bottlenecks.md) / [Maps](docs/maps.md) / [Safety](docs/safety.md) / [Launch audit](docs/launch-audit.md) / [Roadmap](docs/roadmap.md)
 
 **Your repo remembers.**
 

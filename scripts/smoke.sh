@@ -39,6 +39,7 @@ cargo run -p memory-cli -- --db "$DB" examples run billing-export
 cargo run -p memory-cli -- --db "$DB" privacy status
 cargo run -p memory-cli -- --db "$DB" demo seed --workspace smoke-demo --path .
 cargo run -p memory-cli -- --db "$DB" demo multi-model --workspace smoke-demo --path .
+cargo run -p memory-cli -- --db "$DB" doctor "fix the billing export bug" --provider openai --json
 cargo run -p memory-cli -- --db "$DB" wow --json "fix checkout bug"
 cargo run -p memory-cli -- --db "$DB" autopilot "fix checkout bug" --for codex --budget 1500 --output "$DB_DIR/autopilot-codex.md"
 cargo run -p memory-cli -- --db "$DB" ship-demo --output "$DB_DIR/ship-demo.md"
@@ -80,8 +81,10 @@ cargo run -p memory-cli -- --db "$DB" pack "fix checkout bug" --for gemini --bud
 cargo run -p memory-cli -- --db "$DB" pack "fix checkout bug" --for mcp --budget 1500 --output "$DB_DIR/mcp-pack.md"
 cargo run -p memory-cli -- --db "$DB" explain-pack "$GENERIC_CONTEXT"
 cargo run -p memory-cli -- --db "$DB" context-diff "$GENERIC_CONTEXT" "$COMPILED_CONTEXT"
+cargo run -p memory-cli -- --db "$DB" context-diff latest previous
 cargo run -p memory-cli -- --db "$DB" blame --pack "$GENERIC_CONTEXT"
 cargo run -p memory-cli -- --db "$DB" ask "what broke last time checkout changed?"
+cargo run -p memory-cli -- --db "$DB" ask "what broke last time billing changed?"
 cargo run -p memory-cli -- --db "$DB" suggest "fix checkout bug"
 cargo run -p memory-cli -- --db "$DB" warnings "change auth flow"
 cargo run -p memory-cli -- --db "$DB" proactive --task "prepare release"
@@ -126,6 +129,9 @@ cargo run -p memory-cli -- --db "$DB" git watch --once --dry-run --limit 8
 cargo run -p memory-cli -- --db "$DB" watch once --dry-run
 cargo run -p memory-cli -- --db "$DB" watch status
 cargo run -p memory-cli -- --db "$DB" attach cursor --dry-run
+ATTACH_ROOT="$DB_DIR/attach-root"
+mkdir -p "$ATTACH_ROOT"
+(cd "$ATTACH_ROOT" && cargo run --manifest-path "$REPO_ROOT/Cargo.toml" -p memory-cli -- --db "$DB" attach all)
 cargo run -p memory-cli -- --db "$DB" attach --print-config cursor
 cargo run -p memory-cli -- --db "$DB" attach status
 cargo run -p memory-cli -- --db "$DB" attach verify cursor --dry-run
@@ -202,6 +208,7 @@ cargo run -p memory-cli -- --db "$DB" ci explain-failure "auth_refresh_retries" 
 cargo run -p memory-cli -- --db "$DB" ci report --workspace smoke-demo --output "$DB_DIR/ci-report.md"
 cargo run -p memory-cli -- --db "$DB" ci pr-comment --workspace smoke-demo --output "$DB_DIR/ci-pr-comment.md"
 cargo run -p memory-cli -- --db "$DB" embeddings explain
+cargo run -p memory-cli -- --db "$DB" bench --json
 cargo run -p memory-cli -- --db "$DB" start --workspace smoke-demo
 sleep 2
 cargo run -p memory-cli -- --db "$DB" status

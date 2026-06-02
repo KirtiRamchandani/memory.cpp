@@ -53,6 +53,7 @@ Run-Memory --db $db examples run billing-export
 Run-Memory --db $db privacy status
 Run-Memory --db $db demo seed --workspace smoke-demo --path .
 Run-Memory --db $db demo multi-model --workspace smoke-demo --path .
+Run-Memory --db $db doctor "fix the billing export bug" --provider openai --json
 Run-Memory --db $db wow --json "fix checkout bug"
 Run-Memory --db $db autopilot "fix checkout bug" --for codex --budget 1500 --output (Join-Path $dbDir 'autopilot-codex.md')
 Run-Memory --db $db ship-demo --output (Join-Path $dbDir 'ship-demo.md')
@@ -94,8 +95,10 @@ Run-Memory --db $db pack "fix checkout bug" --for gemini --budget 1500 --output 
 Run-Memory --db $db pack "fix checkout bug" --for mcp --budget 1500 --output (Join-Path $dbDir 'mcp-pack.md')
 Run-Memory --db $db explain-pack $genericContext
 Run-Memory --db $db context-diff $genericContext $compiledContext
+Run-Memory --db $db context-diff latest previous
 Run-Memory --db $db blame --pack $genericContext
 Run-Memory --db $db ask "what broke last time checkout changed?"
+Run-Memory --db $db ask "what broke last time billing changed?"
 Run-Memory --db $db suggest "fix checkout bug"
 Run-Memory --db $db warnings "change auth flow"
 Run-Memory --db $db proactive --task "prepare release"
@@ -140,6 +143,17 @@ Run-Memory --db $db git watch --once --dry-run --limit 8
 Run-Memory --db $db watch once --dry-run
 Run-Memory --db $db watch status
 Run-Memory --db $db attach cursor --dry-run
+$attachRoot = Join-Path $dbDir 'attach-root'
+New-Item -ItemType Directory -Force -Path $attachRoot | Out-Null
+Push-Location $attachRoot
+try {
+    & cargo run --manifest-path (Join-Path $PWD '..\..\..\Cargo.toml') -p memory-cli -- --db $db attach all
+    if ($LASTEXITCODE -ne 0) {
+        throw "memory attach all failed in smoke sandbox"
+    }
+} finally {
+    Pop-Location
+}
 Run-Memory --db $db attach --print-config cursor
 Run-Memory --db $db attach status
 Run-Memory --db $db attach verify cursor --dry-run
@@ -211,6 +225,7 @@ Run-Memory --db $db ci explain-failure "auth_refresh_retries" --workspace smoke-
 Run-Memory --db $db ci report --workspace smoke-demo --output (Join-Path $dbDir 'ci-report.md')
 Run-Memory --db $db ci pr-comment --workspace smoke-demo --output (Join-Path $dbDir 'ci-pr-comment.md')
 Run-Memory --db $db embeddings explain
+Run-Memory --db $db bench --json
 Run-Memory --db $db start --workspace smoke-demo
 Start-Sleep -Seconds 2
 Run-Memory --db $db status

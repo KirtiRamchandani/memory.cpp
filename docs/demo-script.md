@@ -14,6 +14,8 @@ memory bench
 
 Expected result: token waste blocked, KV pressure estimated, provider cache plan generated, stale memory excluded, hard rules included, and static reports available under `.memory.cpp/`.
 
+For the current launch evidence matrix, see [launch-audit.md](launch-audit.md).
+
 ## Deterministic terminal transcript
 
 For README screenshots, launch posts, or a public walkthrough, generate a bounded terminal-only transcript:

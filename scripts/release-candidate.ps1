@@ -17,6 +17,7 @@ function Invoke-Step {
 }
 
 Invoke-Step "cargo fmt" { cargo fmt --all -- --check }
+Invoke-Step "cargo check" { cargo check -p memory-cli }
 Invoke-Step "cargo clippy" { cargo clippy --workspace --all-targets -- -D warnings }
 Invoke-Step "cargo test" { cargo test --workspace }
 Invoke-Step "cargo build" { cargo build -p memory-cli }

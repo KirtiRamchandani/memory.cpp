@@ -38,9 +38,11 @@ cargo run -p memory-cli -- --db "$DB" examples dev
 cargo run -p memory-cli -- --db "$DB" examples list
 cargo run -p memory-cli -- --db "$DB" examples run billing-export
 cargo run -p memory-cli -- --db "$DB" privacy status
+cargo run -p memory-cli -- --db "$DB" demo --workspace smoke-demo --path .
 cargo run -p memory-cli -- --db "$DB" demo seed --workspace smoke-demo --path .
 cargo run -p memory-cli -- --db "$DB" demo multi-model --workspace smoke-demo --path .
 cargo run -p memory-cli -- --db "$DB" doctor "fix the billing export bug" --provider openai --json
+cargo run -p memory-cli -- --db "$DB" pack "fix the billing export bug" --for codex --budget 1500 --output "$DB_DIR/billing-codex-pack.md"
 cargo run -p memory-cli -- --db "$DB" wow --json "fix checkout bug"
 cargo run -p memory-cli -- --db "$DB" autopilot "fix checkout bug" --for codex --budget 1500 --output "$DB_DIR/autopilot-codex.md"
 cargo run -p memory-cli -- --db "$DB" ship-demo --output "$DB_DIR/ship-demo.md"

@@ -53,8 +53,11 @@ memory.cpp is a local-first AI memory and context control plane. It helps develo
 The smoke scripts now include the exact acceptance shapes:
 
 ```bash
+memory init
+memory demo
 memory demo multi-model
 memory doctor "fix the billing export bug" --provider openai --json
+memory pack "fix the billing export bug" --for codex --budget 1500
 memory attach all
 memory preflight --for codex "fix checkout bug"
 memory agents-score

@@ -415,6 +415,7 @@ For local development:
 
 ```bash
 cargo fmt --all -- --check
+cargo check -p memory-cli
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build -p memory-cli

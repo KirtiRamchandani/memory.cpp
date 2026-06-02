@@ -12,6 +12,7 @@ run() {
 }
 
 run cargo fmt --all -- --check
+run cargo check -p memory-cli
 run cargo clippy --workspace --all-targets -- -D warnings
 run cargo test --workspace
 run cargo build -p memory-cli

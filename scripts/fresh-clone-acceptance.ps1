@@ -52,6 +52,7 @@ $planned = @(
     'target/debug/memory --db <acceptance-db> init --workspace fresh-clone',
     'target/debug/memory --db <acceptance-db> setup --developer --yes --workspace fresh-clone',
     'target/debug/memory --db <acceptance-db> wow --json "fix billing export bug"',
+    'target/debug/memory --db <acceptance-db> demo --workspace fresh-clone --path .',
     'target/debug/memory --db <acceptance-db> demo seed --workspace fresh-clone --path .',
     'target/debug/memory --db <acceptance-db> demo multi-model --workspace fresh-clone --path .',
     'target/debug/memory --db <acceptance-db> doctor "fix the billing export bug" --provider openai --json',
@@ -158,6 +159,7 @@ function Invoke-MemoryAcceptance {
 Invoke-MemoryAcceptance @('init', '--workspace', 'fresh-clone') $null $cloneDir
 Invoke-MemoryAcceptance @('setup', '--developer', '--yes', '--workspace', 'fresh-clone') $null $cloneDir
 Invoke-MemoryAcceptance @('wow', '--json', 'fix billing export bug') $null $cloneDir
+Invoke-MemoryAcceptance @('demo', '--workspace', 'fresh-clone', '--path', '.') $null $cloneDir
 Invoke-MemoryAcceptance @('demo', 'seed', '--workspace', 'fresh-clone', '--path', '.') $null $cloneDir
 Invoke-MemoryAcceptance @('demo', 'multi-model', '--workspace', 'fresh-clone', '--path', '.') $null $cloneDir
 Invoke-MemoryAcceptance @('doctor', 'fix the billing export bug', '--provider', 'openai', '--json') $doctorJson $cloneDir

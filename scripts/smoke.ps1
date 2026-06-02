@@ -52,9 +52,11 @@ Run-Memory --db $db examples dev
 Run-Memory --db $db examples list
 Run-Memory --db $db examples run billing-export
 Run-Memory --db $db privacy status
+Run-Memory --db $db demo --workspace smoke-demo --path .
 Run-Memory --db $db demo seed --workspace smoke-demo --path .
 Run-Memory --db $db demo multi-model --workspace smoke-demo --path .
 Run-Memory --db $db doctor "fix the billing export bug" --provider openai --json
+Run-Memory --db $db pack "fix the billing export bug" --for codex --budget 1500 --output (Join-Path $dbDir 'billing-codex-pack.md')
 Run-Memory --db $db wow --json "fix checkout bug"
 Run-Memory --db $db autopilot "fix checkout bug" --for codex --budget 1500 --output (Join-Path $dbDir 'autopilot-codex.md')
 Run-Memory --db $db ship-demo --output (Join-Path $dbDir 'ship-demo.md')

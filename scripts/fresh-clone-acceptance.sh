@@ -78,6 +78,7 @@ planned_commands=(
   'target/debug/memory --db <acceptance-db> init --workspace fresh-clone'
   'target/debug/memory --db <acceptance-db> setup --developer --yes --workspace fresh-clone'
   'target/debug/memory --db <acceptance-db> wow --json "fix billing export bug"'
+  'target/debug/memory --db <acceptance-db> demo --workspace fresh-clone --path .'
   'target/debug/memory --db <acceptance-db> demo seed --workspace fresh-clone --path .'
   'target/debug/memory --db <acceptance-db> demo multi-model --workspace fresh-clone --path .'
   'target/debug/memory --db <acceptance-db> doctor "fix the billing export bug" --provider openai --json'
@@ -175,6 +176,7 @@ memory_acceptance() {
 memory_acceptance init --workspace fresh-clone
 memory_acceptance setup --developer --yes --workspace fresh-clone
 memory_acceptance wow --json 'fix billing export bug'
+memory_acceptance demo --workspace fresh-clone --path .
 memory_acceptance demo seed --workspace fresh-clone --path .
 memory_acceptance demo multi-model --workspace fresh-clone --path .
 memory_acceptance --capture "$DOCTOR_JSON" doctor 'fix the billing export bug' --provider openai --json

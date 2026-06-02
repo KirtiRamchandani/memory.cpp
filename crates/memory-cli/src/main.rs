@@ -2654,78 +2654,99 @@ fn main() -> Result<()> {
 }
 
 fn print_extended_help() -> Result<()> {
-    println!("memory");
-    println!(
-        "memory.cpp helps your repo remember what happened, why it changed, and what to do next."
-    );
+    println!("memory.cpp");
+    println!("Your repo remembers. Remember more. Send less. Run faster.");
+    println!("Local-first AI memory and context control plane for developers and coding agents.");
     println!();
     println!("Usage:");
     println!("  memory [--db PATH] [--embedder hash|fastembed|ollama|openai] <command>");
     println!();
-    println!("Beginner-friendly commands:");
-    println!("  welcome                         Friendly first-run overview");
-    println!("  setup --interactive             Guided local setup for this repo");
-    println!("  what                            Explain what memory.cpp is doing");
-    println!("  where                           Show where local data is stored");
-    println!("  today | yesterday               Show a simple repo recap");
-    println!("  next                            Suggest the next practical action");
-    println!("  show-map                        Generate/open the project evolution map");
-    println!("  show-context                    Build an AI assistant context pack");
-    println!("  show-inbox                      Review pending memory candidates");
-    println!("  privacy status                  Show local-first safety status");
+    println!("60-second local demo:");
+    println!("  memory init");
+    println!("  memory demo");
+    println!("  memory doctor \"fix the billing export bug\" --provider openai --json");
+    println!("  memory pack \"fix the billing export bug\" --for codex --budget 1500");
+    println!("  memory attach all");
+    println!("  memory preflight --for codex \"fix the billing export bug\"");
+    println!("  memory agents-score");
+    println!("  memory bench --json");
     println!();
-    println!("Core commands:");
+    println!("One-command product loops:");
+    println!(
+        "  wow                             Demo, doctor, pack, preflight, score, bench, dashboard"
+    );
+    println!(
+        "  autopilot <task>                Compile context, audit cache, test memory, write a pack"
+    );
+    println!(
+        "  ship-demo                       Write deterministic shareable launch/demo artifacts"
+    );
+    println!("  release-check                   Check local release readiness");
+    println!();
+    println!("Memory Vault:");
     println!("  init [--workspace <name>]       Initialize a local memory store");
-    println!("  remember|add <text>             Store a memory");
-    println!("  recall|search <query>           Search memory; supports --profile dev|error|decision|code|docs|test");
-    println!("  explain <query>                 Explain recall/ranking");
-    println!("  edit <id> [content]             Edit memory content or metadata");
-    println!("  restore <id>                    Restore the latest active version");
-    println!("  workspace <cmd>                 Create, switch, list, or show workspaces");
-    println!("  stats                           Show store statistics");
+    println!("  remember <text> --scope repo    Store durable local memory with evidence metadata");
+    println!("  recall|search <query>           Search memory with profiles: dev,error,decision,code,docs,test");
+    println!("  forget <id>                     Mark memory forgotten without unsafe deletion");
+    println!("  update-memory <id> <text>       Update a memory while preserving history");
+    println!("  memories list|show|export|import");
+    println!("  profile show|build|update       Local user/app/agent profile memory");
+    println!("  mistake <text>                  Add a mistake-firewall rule");
     println!();
-    println!("Developer workflow:");
+    println!("Context Compiler and Token Firewall:");
+    println!("  compile <task> --provider openai|claude|gemini|generic --budget 1500");
+    println!("  pack <task> --for codex|claude|gemini|cursor|continue|mcp|generic");
+    println!("  explain-compile <task>          Explain included/excluded memories and token cost");
+    println!("  token-firewall <task>           Show duplicate, stale, unsafe, and noisy context blocked");
+    println!("  prefill-report <task>           Estimate prompt prefill work avoided");
+    println!("  kv-budget <task> --max-kv-tokens 4096");
+    println!("  signal-density <task>           Show useful signal versus noise");
+    println!("  cache-plan|cache-audit|cache-hash|cache-stability");
+    println!("  runtime-plan <task> --runtime generic|llama.cpp|ollama|vllm|sglang");
+    println!("  savings | roi | leaderboard     Approximate token/cost/reuse summaries");
+    println!();
+    println!("Daily developer workflow:");
+    println!("  welcome                         Friendly first-run overview");
+    println!("  setup --developer --yes         Create safe local defaults for this repo");
+    println!("  what | where                    Explain the product and local data paths");
+    println!("  today | yesterday | week        Repo recaps from local memory, Git, terminal, CI");
+    println!("  next                            Suggest practical next actions with commands");
     println!("  dev morning                     Daily recap: work, changes, breakage, TODOs, next command");
     println!("  dev resume [query]              Reconstruct interrupted work with AI context");
     println!("  dev explain-repo                Instant repo briefing");
-    println!("  dev next                        Practical next actions grounded in repo state");
-    println!("  dev recall-error <error>        Recall previous fixes for an error");
-    println!("  dev test-failures               Show remembered flaky/failing tests");
-    println!("  dev recall-test <name>          Recall fixes for a specific test");
-    println!("  dev context --for cursor|codex|claude");
-    println!("  dev onboard --output markdown   Generate onboarding notes");
-    println!("  dev readme-suggest              Suggest README updates without editing");
-    println!("  dev changelog --since <ref|30d> Generate changelog bullets");
-    println!("  dev health                      Repo health summary");
-    println!("  dev pr-summary                  Lightweight PR summary");
-    println!("  dev review                      Recall review/style memory");
+    println!("  ask|suggest|warnings|proactive  Answer and guide from local evidence only");
     println!();
-    println!("Automation and inbox:");
+    println!("Automation, review, and Memory CI:");
+    println!("  watch once --dry-run            Preview automatic local candidate generation");
     println!("  git ingest|summary|decisions|bugs|map|watch");
-    println!("  inbox [list]                    Review pending candidates");
-    println!("  inbox stats|explain|edit|approve|reject|approve-all");
-    println!("  terminal enable|record|commands|last-error|search");
-    println!("  ci ingest <log>|explain-failure");
+    println!("  inbox review                    Approve/edit/reject candidate memories");
+    println!("  review | trust-report | evidence <id> | quarantine review");
+    println!("  test | ci-check                 Test generated memory packs like code");
+    println!("  terminal enable|record|commands|last-error|search|privacy");
+    println!("  ci ingest <log>|explain-failure|report|pr-comment");
+    println!("  flight start|stop|replay|summarize|learn");
+    println!("  context-diff latest previous | blame | explain-pack");
     println!();
-    println!("Maps and integrations:");
-    println!("  map [PATH] --type evolution --output html --save evolution.html");
-    println!("  map why <topic>                 Explain why a feature or decision exists");
-    println!(
-        "  map impact <topic>              Show affected files, commands, tests, docs, and risks"
-    );
-    println!("  attach cursor|claude|gemini|codex|mcp|ollama|all");
-    println!("  proxy --learn --approval-required");
+    println!("Maps, reports, sharing, and integrations:");
+    println!("  map --type evolution --output html --save .memory.cpp/maps/evolution.html");
+    println!("  map why <topic> | map impact <topic>");
+    println!("  dashboard --html | heatmap --html | report --html");
+    println!("  share status|map|context|morning|pr|onboarding|release");
+    println!("  docs generate|readme|onboarding|architecture|commands");
+    println!("  pr summary|risks|checklist|context|comment");
+    println!("  timeline week | rewind last-week | handoff new-dev | adoption status");
+    println!("  attach cursor|claude|gemini|codex|continue|mcp|ollama|all");
+    println!("  attach status|doctor|verify|repair|backup-list");
+    println!("  shared-context status|export|import|pack");
     println!("  mcp                             Read-only, redacted MCP server by default");
-    println!("  embeddings status|list|set|migrate");
-    println!("  doctor                          Diagnose local setup and exact fixes");
-    println!("  start | stop | status           Lightweight runtime management");
     println!();
-    println!("Parser note:");
-    println!(
-        "  Launch commands use a small manual pre-parser to avoid a known Clap stack-overflow edge"
-    );
-    println!("  case from the oversized nested command tree. The static help page keeps the CLI launchable");
-    println!("  while the command tree is split into smaller modules.");
+    println!("Safety defaults:");
+    println!("  local SQLite storage under .memory.cpp/");
+    println!("  no telemetry, no account, no upload by default");
+    println!("  .memoryignore and .gitignore respected where applicable");
+    println!("  secret redaction, prompt-injection quarantine, review-gated writes");
+    println!("  MCP read-only by default; write tools require explicit approval");
+    println!("  memory.cpp reduces KV pressure by reducing unnecessary tokens before inference");
     Ok(())
 }
 

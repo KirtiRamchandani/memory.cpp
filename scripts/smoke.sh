@@ -24,6 +24,11 @@ printf '%s\n' 'Smoke ingest note: memory.cpp stores local project facts, command
 "$SCRIPT_DIR/install.sh" --dry-run
 "$SCRIPT_DIR/demo-terminal.sh" --dry-run --output "$DB_DIR/terminal-demo"
 "$SCRIPT_DIR/fresh-clone-acceptance.sh" --dry-run --output "$DB_DIR/fresh-clone-acceptance"
+HELP_OUTPUT="$(cargo run -q -p memory-cli -- --help)"
+case "$HELP_OUTPUT" in
+  *'Context Compiler and Token Firewall'*'60-second local demo'*) ;;
+  *) echo 'Expected top-level help to include the public product workflow.' >&2; exit 1 ;;
+esac
 cargo run -p memory-cli -- --db "$DB" init --workspace smoke-demo
 cargo run -p memory-cli -- --db "$DB" setup --developer --yes --workspace smoke-demo
 cargo run -p memory-cli -- --db "$DB" what

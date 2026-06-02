@@ -38,6 +38,10 @@ Set-Content -Path $safeIngest -Value "Smoke ingest note: memory.cpp stores local
 & (Join-Path $PSScriptRoot 'install.ps1') -DryRun
 & (Join-Path $PSScriptRoot 'demo-terminal.ps1') -DryRun -Output (Join-Path $dbDir 'terminal-demo')
 & (Join-Path $PSScriptRoot 'fresh-clone-acceptance.ps1') -DryRun -Output (Join-Path $dbDir 'fresh-clone-acceptance')
+$helpOutput = ((cargo run -q -p memory-cli -- --help) | Out-String)
+if ($helpOutput -notmatch 'Context Compiler and Token Firewall' -or $helpOutput -notmatch '60-second local demo') {
+    throw 'Expected top-level help to include the public product workflow.'
+}
 Run-Memory --db $db init --workspace smoke-demo
 Run-Memory --db $db setup --developer --yes --workspace smoke-demo
 Run-Memory --db $db what

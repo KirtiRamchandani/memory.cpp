@@ -19,6 +19,7 @@ memory.cpp is a local-first AI memory and context control plane. It helps develo
 | Objective area | Current evidence |
 | --- | --- |
 | Public repository | GitHub reports `visibility: PUBLIC` for `KirtiRamchandani/memory.cpp`. |
+| Public first-run help | `memory --help` now presents the 60-second local demo, Memory Vault, Context Compiler, Token Firewall, Cache Router, Memory CI, reports, integrations, and safety defaults. Smoke scripts assert this help shape. |
 | No cloud by default | README, privacy docs, setup output, smoke output, and CLI reports say local-only/no upload by default. |
 | No telemetry or accounts | README and docs describe local SQLite storage and no account requirement. |
 | No hardware-vendor claims | README/docs use provider-neutral and runtime-neutral wording. |

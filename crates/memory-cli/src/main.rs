@@ -2691,6 +2691,9 @@ fn print_extended_help() -> Result<()> {
     println!("  update-memory <id> <text>       Update a memory while preserving history");
     println!("  memories list|show|export|import");
     println!("  profile show|build|update       Local user/app/agent profile memory");
+    println!("  entity create|list|show|link   People, agents, tools, projects, and relations");
+    println!("  session start|add-message|add-event|summarize");
+    println!("  insight derive|list|show        Local evidence-backed project insights");
     println!("  mistake <text>                  Add a mistake-firewall rule");
     println!();
     println!("Context Compiler and Token Firewall:");
@@ -3005,6 +3008,18 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
         "profile" => {
             let engine = build_engine_from_options(&options)?;
             profile_command(&engine, &rest)?;
+        }
+        "entity" => {
+            let engine = build_engine_from_options(&options)?;
+            entity_command(&engine, &rest)?;
+        }
+        "session" => {
+            let engine = build_engine_from_options(&options)?;
+            session_command(&engine, &rest)?;
+        }
+        "insight" => {
+            let engine = build_engine_from_options(&options)?;
+            insight_command(&engine, &rest)?;
         }
         "trust-report" => {
             let engine = build_engine_from_options(&options)?;
@@ -3778,6 +3793,9 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "memories",
         "update-memory",
         "profile",
+        "entity",
+        "session",
+        "insight",
         "trust-report",
         "redactions",
         "evidence",
@@ -12217,6 +12235,476 @@ fn profile_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn stateful_scope(engine: &MemoryEngine, rest: &[String]) -> Result<String> {
+    Ok(cli_flag_value(rest, "--scope")
+        .or_else(|| cli_flag_value(rest, "--workspace"))
+        .or(current_workspace_name(engine)?)
+        .unwrap_or_else(|| "default".to_string()))
+}
+
+fn metadata_str<'a>(memory: &'a memory_core::StoredMemory, path: &str) -> Option<&'a str> {
+    memory
+        .metadata
+        .pointer(path)
+        .or_else(|| {
+            path.strip_prefix("/memory_cpp/").and_then(|suffix| {
+                memory
+                    .metadata
+                    .pointer(&format!("/memory_cpp_state/{suffix}"))
+            })
+        })
+        .and_then(Value::as_str)
+}
+
+fn metadata_bool(memory: &memory_core::StoredMemory, path: &str) -> bool {
+    memory
+        .metadata
+        .pointer(path)
+        .or_else(|| {
+            path.strip_prefix("/memory_cpp/").and_then(|suffix| {
+                memory
+                    .metadata
+                    .pointer(&format!("/memory_cpp_state/{suffix}"))
+            })
+        })
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn entity_memories(
+    engine: &MemoryEngine,
+    scope: Option<&str>,
+) -> Result<Vec<memory_core::StoredMemory>> {
+    Ok(engine
+        .all_memories(scope, true)?
+        .into_iter()
+        .filter(|memory| metadata_bool(memory, "/memory_cpp/entity"))
+        .collect())
+}
+
+fn find_entity_memory(
+    engine: &MemoryEngine,
+    scope: &str,
+    id_or_name: &str,
+) -> Result<memory_core::StoredMemory> {
+    entity_memories(engine, Some(scope))?
+        .into_iter()
+        .chain(entity_memories(engine, None)?)
+        .find(|memory| {
+            memory.id == id_or_name
+                || memory.id.starts_with(id_or_name)
+                || metadata_str(memory, "/memory_cpp/name")
+                    .is_some_and(|name| name.eq_ignore_ascii_case(id_or_name))
+        })
+        .ok_or_else(|| anyhow!("entity not found: {id_or_name}"))
+}
+
+fn entity_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest.first().map(String::as_str).unwrap_or("list");
+    let scope = stateful_scope(engine, rest)?;
+    match action {
+        "create" => {
+            let entity_type =
+                cli_flag_value(rest, "--type").unwrap_or_else(|| "project".to_string());
+            let name = cli_flag_value(rest, "--name")
+                .unwrap_or_else(|| task_from_rest(&rest[1..], "unnamed entity"));
+            let stored = engine.remember(
+                NewMemory::new(format!("Entity ({entity_type}): {name}"))
+                    .kind(MemoryKind::Persona.as_str())
+                    .scope(scope)
+                    .tag("entity")
+                    .tag(entity_type.clone())
+                    .metadata(json!({
+                        "memory_cpp_state": {
+                            "entity": true,
+                            "entity_type": entity_type,
+                            "name": name,
+                            "source": "memory entity create"
+                        }
+                    }))
+                    .importance(0.72)
+                    .confidence(0.88)
+                    .human_confirmed(true),
+            )?;
+            if cli_flag(rest, "--json") {
+                println!("{}", serde_json::to_string_pretty(&memory_brief(&stored))?);
+            } else {
+                println!("entity stored: {}", stored.id);
+                println!(
+                    "name: {}",
+                    metadata_str(&stored, "/memory_cpp/name").unwrap_or("")
+                );
+                println!(
+                    "type: {}",
+                    metadata_str(&stored, "/memory_cpp/entity_type").unwrap_or("")
+                );
+                println!("next: memory entity show {}", stored.id);
+            }
+        }
+        "list" => {
+            let requested_type = cli_flag_value(rest, "--type");
+            let mut memories = entity_memories(engine, Some(&scope))?;
+            if let Some(kind) = requested_type.as_deref() {
+                memories.retain(|memory| {
+                    metadata_str(memory, "/memory_cpp/entity_type")
+                        .is_some_and(|value| value.eq_ignore_ascii_case(kind))
+                });
+            }
+            if cli_flag(rest, "--json") {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &memories.iter().map(memory_brief).collect::<Vec<_>>()
+                    )?
+                );
+            } else {
+                println!("entities for scope: {scope}");
+                if memories.is_empty() {
+                    println!("not found: no entities yet");
+                    println!("try: memory entity create --type project --name \"memory.cpp\"");
+                }
+                for memory in memories {
+                    println!(
+                        "- {} [{}] {}",
+                        memory.id,
+                        metadata_str(&memory, "/memory_cpp/entity_type").unwrap_or("entity"),
+                        metadata_str(&memory, "/memory_cpp/name").unwrap_or(&memory.summary)
+                    );
+                }
+            }
+        }
+        "show" => {
+            let id = first_positional_after_action(rest)
+                .ok_or_else(|| anyhow!("usage: memory entity show <id-or-name>"))?;
+            let memory = find_entity_memory(engine, &scope, id)?;
+            if cli_flag(rest, "--json") {
+                println!("{}", serde_json::to_string_pretty(&memory_brief(&memory))?);
+            } else {
+                println!("entity {}", memory.id);
+                println!("scope: {}", memory.scope);
+                println!(
+                    "type: {}",
+                    metadata_str(&memory, "/memory_cpp/entity_type").unwrap_or("entity")
+                );
+                println!(
+                    "name: {}",
+                    metadata_str(&memory, "/memory_cpp/name").unwrap_or(&memory.summary)
+                );
+                println!("evidence: local memory {}", memory.id);
+            }
+        }
+        "link" => {
+            let positionals =
+                positionals_after_action(rest, &["--relation", "--scope", "--workspace"]);
+            let left = positionals.first().ok_or_else(|| {
+                anyhow!("usage: memory entity link <a> <b> --relation \"works_on\"")
+            })?;
+            let right = positionals.get(1).ok_or_else(|| {
+                anyhow!("usage: memory entity link <a> <b> --relation \"works_on\"")
+            })?;
+            let relation =
+                cli_flag_value(rest, "--relation").unwrap_or_else(|| "related_to".to_string());
+            let left_memory = find_entity_memory(engine, &scope, left)?;
+            let right_memory = find_entity_memory(engine, &scope, right)?;
+            let stored = engine.remember(
+                NewMemory::new(format!(
+                    "Entity relation: {} --{}--> {}",
+                    metadata_str(&left_memory, "/memory_cpp/name").unwrap_or(&left_memory.summary),
+                    relation,
+                    metadata_str(&right_memory, "/memory_cpp/name")
+                        .unwrap_or(&right_memory.summary)
+                ))
+                .kind(MemoryKind::Event.as_str())
+                .scope(scope)
+                .tag("entity")
+                .tag("relationship")
+                .metadata(json!({
+                    "memory_cpp_state": {
+                        "entity_relation": true,
+                        "left": left_memory.id,
+                        "right": right_memory.id,
+                        "relation": relation,
+                        "source": "memory entity link"
+                    }
+                }))
+                .importance(0.62)
+                .confidence(0.86)
+                .human_confirmed(true),
+            )?;
+            println!("entity relation stored: {}", stored.id);
+            println!("next: memory graph \"{}\"", stored.summary);
+        }
+        _ => println!(
+            "entity commands: create, list, show <id-or-name>, link <a> <b> --relation <relation>"
+        ),
+    }
+    Ok(())
+}
+
+fn session_memories(
+    engine: &MemoryEngine,
+    scope: Option<&str>,
+) -> Result<Vec<memory_core::StoredMemory>> {
+    Ok(engine
+        .all_memories(scope, true)?
+        .into_iter()
+        .filter(|memory| {
+            metadata_bool(memory, "/memory_cpp/session")
+                || metadata_bool(memory, "/memory_cpp/session_event")
+        })
+        .collect())
+}
+
+fn latest_session_id(engine: &MemoryEngine, scope: &str) -> Result<Option<String>> {
+    Ok(session_memories(engine, Some(scope))?
+        .into_iter()
+        .filter(|memory| metadata_bool(memory, "/memory_cpp/session"))
+        .max_by_key(|memory| memory.created_at)
+        .map(|memory| memory.id))
+}
+
+fn session_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest.first().map(String::as_str).unwrap_or("summarize");
+    let scope = stateful_scope(engine, rest)?;
+    match action {
+        "start" => {
+            let name = cli_flag_value(rest, "--name").unwrap_or_else(|| "work session".to_string());
+            let goal = cli_flag_value(rest, "--goal")
+                .unwrap_or_else(|| task_from_rest(&rest[1..], "continue useful repo work"));
+            let stored = engine.remember(
+                NewMemory::new(format!("Session started: {name}. Goal: {goal}"))
+                    .kind(MemoryKind::Task.as_str())
+                    .scope(scope)
+                    .tag("session")
+                    .tag("project_state")
+                    .metadata(json!({
+                        "memory_cpp_state": {
+                            "session": true,
+                            "name": name,
+                            "goal": goal,
+                            "source": "memory session start"
+                        }
+                    }))
+                    .importance(0.7)
+                    .confidence(0.9)
+                    .human_confirmed(true),
+            )?;
+            println!("session started: {}", stored.id);
+            println!(
+                "goal: {}",
+                metadata_str(&stored, "/memory_cpp/goal").unwrap_or("")
+            );
+            println!("next: memory session add-event --type command --text \"cargo test\"");
+        }
+        "add-message" | "add-event" => {
+            let session_id = cli_flag_value(rest, "--session")
+                .or(latest_session_id(engine, &scope)?)
+                .ok_or_else(|| {
+                    anyhow!("no session found; run memory session start --goal \"...\" first")
+                })?;
+            let event_type = if action == "add-message" {
+                cli_flag_value(rest, "--role").unwrap_or_else(|| "user".to_string())
+            } else {
+                cli_flag_value(rest, "--type").unwrap_or_else(|| "event".to_string())
+            };
+            let text = cli_flag_value(rest, "--text")
+                .unwrap_or_else(|| task_from_rest(&rest[1..], "session event"));
+            let stored = engine.remember(
+                NewMemory::new(format!("Session {event_type}: {text}"))
+                    .kind(MemoryKind::Event.as_str())
+                    .scope(scope)
+                    .tag("session")
+                    .tag(event_type.clone())
+                    .metadata(json!({
+                        "memory_cpp_state": {
+                            "session_event": true,
+                            "session_id": session_id,
+                            "event_type": event_type,
+                            "text": text,
+                            "source": format!("memory session {action}")
+                        }
+                    }))
+                    .importance(0.58)
+                    .confidence(0.82),
+            )?;
+            println!("session event stored: {}", stored.id);
+            println!(
+                "session: {}",
+                metadata_str(&stored, "/memory_cpp/session_id").unwrap_or("")
+            );
+        }
+        "summarize" => {
+            let session_id = first_positional_after_action(rest)
+                .map(str::to_string)
+                .or_else(|| cli_flag_value(rest, "--session"))
+                .or(latest_session_id(engine, &scope)?)
+                .ok_or_else(|| {
+                    anyhow!("no session found; run memory session start --goal \"...\" first")
+                })?;
+            let mut items = session_memories(engine, Some(&scope))?
+                .into_iter()
+                .filter(|memory| {
+                    memory.id == session_id
+                        || metadata_str(memory, "/memory_cpp/session_id")
+                            .is_some_and(|value| value == session_id)
+                })
+                .collect::<Vec<_>>();
+            items.sort_by_key(|memory| memory.created_at);
+            let summary_text = if items.is_empty() {
+                format!("Session {session_id}: no events found.")
+            } else {
+                let bullets = items
+                    .iter()
+                    .map(|memory| format!("- {}", memory.summary))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!("Session summary for {session_id}\n{bullets}")
+            };
+            if cli_flag(rest, "--store") {
+                let stored = engine.remember(
+                    NewMemory::new(summary_text.clone())
+                        .kind(MemoryKind::Summary.as_str())
+                        .scope(scope)
+                        .tag("session")
+                        .tag("session_summary")
+                        .metadata(json!({
+                            "memory_cpp_state": {
+                                "session_summary": true,
+                                "session_id": session_id,
+                                "source": "memory session summarize"
+                            }
+                        }))
+                        .importance(0.72)
+                        .confidence(0.84),
+                )?;
+                println!("session summary stored: {}", stored.id);
+            }
+            println!("{summary_text}");
+        }
+        _ => println!("session commands: start, add-message, add-event, summarize"),
+    }
+    Ok(())
+}
+
+fn insight_memories(
+    engine: &MemoryEngine,
+    scope: Option<&str>,
+) -> Result<Vec<memory_core::StoredMemory>> {
+    Ok(engine
+        .all_memories(scope, true)?
+        .into_iter()
+        .filter(|memory| metadata_bool(memory, "/memory_cpp/insight"))
+        .collect())
+}
+
+fn insight_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let action = rest.first().map(String::as_str).unwrap_or("list");
+    let scope = stateful_scope(engine, rest)?;
+    match action {
+        "derive" => {
+            let limit = option_usize(rest, "--limit", 40);
+            let memories = engine.list_recent(Some(&scope), limit)?;
+            let decisions = memories
+                .iter()
+                .filter(|memory| matches!(memory.kind, MemoryKind::Decision))
+                .count();
+            let fixes = memories
+                .iter()
+                .filter(|memory| {
+                    matches!(memory.kind, MemoryKind::Bug)
+                        || memory.content.to_ascii_lowercase().contains("fix")
+                })
+                .count();
+            let commands = memories
+                .iter()
+                .filter(|memory| {
+                    memory.content.to_ascii_lowercase().contains("cargo ")
+                        || memory.content.to_ascii_lowercase().contains("memory ")
+                })
+                .count();
+            let text = format!(
+                "Project insight for {scope}: {} recent memories, {decisions} decision(s), {fixes} fix/failure signal(s), {commands} command/workflow signal(s). Next action: run memory dev next and review any pending inbox candidates.",
+                memories.len()
+            );
+            if cli_flag(rest, "--dry-run") {
+                println!("{text}");
+                return Ok(());
+            }
+            let evidence = memories
+                .iter()
+                .take(8)
+                .map(|memory| memory.id.clone())
+                .collect::<Vec<_>>();
+            let stored = engine.remember(
+                NewMemory::new(text)
+                    .kind(MemoryKind::Summary.as_str())
+                    .scope(scope)
+                    .tag("insight")
+                    .tag("project_state")
+                    .metadata(json!({
+                        "memory_cpp_state": {
+                            "insight": true,
+                            "source": "memory insight derive",
+                            "evidence_memory_ids": evidence,
+                            "derived_counts": {
+                                "decisions": decisions,
+                                "fixes": fixes,
+                                "commands": commands
+                            }
+                        }
+                    }))
+                    .importance(0.76)
+                    .confidence(if memories.is_empty() { 0.45 } else { 0.8 }),
+            )?;
+            println!("insight stored: {}", stored.id);
+            println!(
+                "evidence memories: {}",
+                stored.metadata["memory_cpp_state"]["evidence_memory_ids"]
+            );
+        }
+        "list" => {
+            let insights = insight_memories(engine, Some(&scope))?;
+            if cli_flag(rest, "--json") {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &insights.iter().map(memory_brief).collect::<Vec<_>>()
+                    )?
+                );
+            } else {
+                println!("insights for scope: {scope}");
+                if insights.is_empty() {
+                    println!("not found: no insights yet");
+                    println!("try: memory insight derive --scope {scope}");
+                }
+                for memory in insights {
+                    println!("- {} {}", memory.id, memory.summary);
+                }
+            }
+        }
+        "show" => {
+            let id = first_positional_after_action(rest)
+                .ok_or_else(|| anyhow!("usage: memory insight show <id>"))?;
+            let memory = find_memory(engine, id)?;
+            if !metadata_bool(&memory, "/memory_cpp/insight") {
+                return Err(anyhow!("memory is not an insight: {id}"));
+            }
+            if cli_flag(rest, "--json") {
+                println!("{}", serde_json::to_string_pretty(&memory_brief(&memory))?);
+            } else {
+                println!("insight {}", memory.id);
+                println!("{}", memory.content);
+                println!(
+                    "evidence: {}",
+                    memory.metadata["memory_cpp_state"]["evidence_memory_ids"]
+                );
+            }
+        }
+        _ => println!("insight commands: derive, list, show <id>"),
+    }
+    Ok(())
+}
+
 fn explain_compile_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
     let task = task_from_rest(rest, "current task");
     let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
@@ -14138,6 +14626,26 @@ fn first_positional_after_action(rest: &[String]) -> Option<&str> {
         .skip(1)
         .find(|value| !value.starts_with("--"))
         .map(String::as_str)
+}
+
+fn positionals_after_action<'a>(rest: &'a [String], value_flags: &[&str]) -> Vec<&'a str> {
+    let mut out = Vec::new();
+    let mut skip_next = false;
+    for value in rest.iter().skip(1) {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if value_flags.contains(&value.as_str()) {
+            skip_next = true;
+            continue;
+        }
+        if value.starts_with("--") {
+            continue;
+        }
+        out.push(value.as_str());
+    }
+    out
 }
 
 fn default_share_path(action: &str) -> PathBuf {
@@ -19620,6 +20128,9 @@ mod tests {
             "memories",
             "update-memory",
             "profile",
+            "entity",
+            "session",
+            "insight",
             "trust-report",
             "redactions",
             "evidence",
@@ -20426,6 +20937,83 @@ mod tests {
     }
 
     #[test]
+    fn stateful_entity_session_and_insight_commands_store_local_memory() -> Result<()> {
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_nanos();
+        let dir = env::temp_dir().join(format!("memory-cpp-stateful-test-{unique}"));
+        fs::create_dir_all(&dir)?;
+        let engine = MemoryEngine::open_default(dir.join("memory.db"))?;
+        engine.create_workspace("default", "test workspace", "project", true)?;
+
+        entity_command(
+            &engine,
+            &[
+                "create".to_string(),
+                "--type".to_string(),
+                "agent".to_string(),
+                "--name".to_string(),
+                "Codex".to_string(),
+            ],
+        )?;
+        entity_command(
+            &engine,
+            &[
+                "create".to_string(),
+                "--type".to_string(),
+                "project".to_string(),
+                "--name".to_string(),
+                "memory.cpp".to_string(),
+            ],
+        )?;
+        entity_command(
+            &engine,
+            &[
+                "link".to_string(),
+                "Codex".to_string(),
+                "memory.cpp".to_string(),
+                "--relation".to_string(),
+                "works_on".to_string(),
+            ],
+        )?;
+        session_command(
+            &engine,
+            &[
+                "start".to_string(),
+                "--name".to_string(),
+                "release".to_string(),
+                "--goal".to_string(),
+                "finish launch polish".to_string(),
+            ],
+        )?;
+        session_command(
+            &engine,
+            &[
+                "add-event".to_string(),
+                "--type".to_string(),
+                "test".to_string(),
+                "--text".to_string(),
+                "cargo test passed".to_string(),
+            ],
+        )?;
+        insight_command(&engine, &["derive".to_string()])?;
+
+        let memories = engine.all_memories(Some("default"), true)?;
+        assert!(memories
+            .iter()
+            .any(|memory| metadata_bool(memory, "/memory_cpp/entity")));
+        assert!(memories
+            .iter()
+            .any(|memory| metadata_bool(memory, "/memory_cpp/session_event")));
+        assert!(memories
+            .iter()
+            .any(|memory| metadata_bool(memory, "/memory_cpp/insight")));
+        drop(engine);
+        fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    #[test]
     fn inference_fixtures_cover_batch_cache_runtime_and_rollup() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for path in [
@@ -20566,6 +21154,7 @@ mod tests {
             "docs/terminal-memory.md",
             "docs/ai-context.md",
             "docs/context-packs.md",
+            "docs/stateful-memory.md",
             "docs/maps.md",
             "docs/inbox.md",
             "docs/doctor.md",

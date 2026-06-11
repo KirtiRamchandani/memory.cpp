@@ -4,7 +4,7 @@
 ![Release](https://github.com/KirtiRamchandani/memory.cpp/actions/workflows/release.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
-[Quick start](docs/quickstart.md) / [Install](docs/install.md) / [CLI](docs/cli.md) / [AI context](docs/context-packs.md) / [Context compiler](docs/context-compiler.md) / [Inference bottlenecks](docs/inference-bottlenecks.md) / [Maps](docs/maps.md) / [Safety](docs/safety.md) / [Launch audit](docs/launch-audit.md) / [Roadmap](docs/roadmap.md)
+[Quick start](docs/quickstart.md) / [Install](docs/install.md) / [CLI](docs/cli.md) / [AI context](docs/context-packs.md) / [Context compiler](docs/context-compiler.md) / [Stateful memory](docs/stateful-memory.md) / [Inference bottlenecks](docs/inference-bottlenecks.md) / [Maps](docs/maps.md) / [Safety](docs/safety.md) / [Launch audit](docs/launch-audit.md) / [Roadmap](docs/roadmap.md)
 
 **Your repo remembers.**
 
@@ -154,6 +154,9 @@ The main goal of `memory.cpp` is to make a software repository explainable and r
 | `memory explain-compile "fix checkout bug"` | Show why context was included or excluded. |
 | `memory memories list` | Inspect the local memory vault. |
 | `memory profile update "Prefers short PR summaries"` | Build local user/app/agent profile memory. |
+| `memory entity create --type agent --name Codex` | Store people, agents, tools, projects, and relations locally. |
+| `memory session start --goal "finish release"` | Start an evidence-backed work session without cloud sync. |
+| `memory insight derive --scope repo` | Derive local project insights from recent memories and events. |
 | `memory ask "what broke last time billing changed?"` | Answer from local memory with evidence IDs. |
 | `memory warnings "change auth flow"` | Show stale memories, secrets, and prior risks for a task. |
 | `memory flight start --goal "fix checkout bug" --tool codex` | Start a local AI work-session recorder. |

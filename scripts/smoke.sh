@@ -70,6 +70,15 @@ cargo run -p memory-cli -- --db "$DB" remember "Smoke profile prefers concise su
 cargo run -p memory-cli -- --db "$DB" memories list --limit 5
 cargo run -p memory-cli -- --db "$DB" profile show --scope user
 cargo run -p memory-cli -- --db "$DB" profile update "Smoke user prefers local-first reports." --scope user
+cargo run -p memory-cli -- --db "$DB" entity create --type agent --name Codex --scope smoke-demo
+cargo run -p memory-cli -- --db "$DB" entity create --type project --name memory.cpp --scope smoke-demo
+cargo run -p memory-cli -- --db "$DB" entity link Codex memory.cpp --relation works_on --scope smoke-demo
+cargo run -p memory-cli -- --db "$DB" entity list --scope smoke-demo
+cargo run -p memory-cli -- --db "$DB" session start --name smoke-release --goal "validate stateful memory" --scope smoke-demo
+cargo run -p memory-cli -- --db "$DB" session add-event --type test --text "stateful smoke event recorded" --scope smoke-demo
+cargo run -p memory-cli -- --db "$DB" session summarize --scope smoke-demo
+cargo run -p memory-cli -- --db "$DB" insight derive --scope smoke-demo
+cargo run -p memory-cli -- --db "$DB" insight list --scope smoke-demo
 cargo run -p memory-cli -- --db "$DB" mistake "Use cargo fmt before committing Rust changes."
 cargo run -p memory-cli -- --db "$DB" trace compress --file examples/agent-log.txt
 cargo run -p memory-cli -- --db "$DB" trace learn --file examples/agent-log.txt

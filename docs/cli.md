@@ -105,6 +105,9 @@ memory cache-stability
 memory memories
 memory update-memory
 memory profile
+memory entity
+memory session
+memory insight
 memory trust-report
 memory redactions
 memory evidence
@@ -251,6 +254,14 @@ memory memories list
 memory memories show <memory_id>
 memory memories export --format json --output .memory.cpp/memories.json
 memory profile update "Prefers concise PR summaries" --scope user
+memory entity create --type agent --name Codex
+memory entity create --type project --name memory.cpp
+memory entity link Codex memory.cpp --relation works_on
+memory session start --name release-polish --goal "finish launch readiness"
+memory session add-event --type test --text "cargo test passed"
+memory session summarize
+memory insight derive --scope repo
+memory insight list --scope repo
 memory explain-compile "fix checkout bug" --provider openai
 memory ask "what broke last time checkout changed?"
 memory suggest "fix checkout bug"

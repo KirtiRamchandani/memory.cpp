@@ -79,6 +79,15 @@ Run-Memory --db $db remember "Smoke profile prefers concise summaries." --scope 
 Run-Memory --db $db memories list --limit 5
 Run-Memory --db $db profile show --scope user
 Run-Memory --db $db profile update "Smoke user prefers local-first reports." --scope user
+Run-Memory --db $db entity create --type agent --name Codex --scope smoke-demo
+Run-Memory --db $db entity create --type project --name memory.cpp --scope smoke-demo
+Run-Memory --db $db entity link Codex memory.cpp --relation works_on --scope smoke-demo
+Run-Memory --db $db entity list --scope smoke-demo
+Run-Memory --db $db session start --name smoke-release --goal "validate stateful memory" --scope smoke-demo
+Run-Memory --db $db session add-event --type test --text "stateful smoke event recorded" --scope smoke-demo
+Run-Memory --db $db session summarize --scope smoke-demo
+Run-Memory --db $db insight derive --scope smoke-demo
+Run-Memory --db $db insight list --scope smoke-demo
 Run-Memory --db $db mistake "Use cargo fmt before committing Rust changes."
 Run-Memory --db $db trace compress --file examples/agent-log.txt
 Run-Memory --db $db trace learn --file examples/agent-log.txt

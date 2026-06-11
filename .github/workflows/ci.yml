@@ -31,3 +31,6 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: bash ./scripts/smoke.sh
+      - name: Memory tests file
+        if: runner.os == 'Linux'
+        run: cargo run -p memory-cli -- test --file memory.tests.yaml

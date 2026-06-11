@@ -18481,8 +18481,28 @@ fn handle_mcp_message(engine: &MemoryEngine, request: Value, config: &McpRuntime
         "initialize" => json!({
             "protocolVersion": "2024-11-05",
             "serverInfo": { "name": "memory.cpp", "version": env!("CARGO_PKG_VERSION") },
-            "capabilities": { "tools": {} }
+            "capabilities": { "tools": {}, "resources": {} }
         }),
+        "resources/list" => json!({ "resources": mcp_resources() }),
+        "resources/read" => {
+            let params = request.get("params").cloned().unwrap_or(Value::Null);
+            let uri = params
+                .get("uri")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            match read_mcp_resource(engine, uri) {
+                Ok(contents) => json!({
+                    "contents": [{
+                        "uri": uri,
+                        "mimeType": "text/plain",
+                        "text": contents
+                    }]
+                }),
+                Err(err) => {
+                    return json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32002, "message": err.to_string() } })
+                }
+            }
+        },
         "tools/list" => json!({ "tools": mcp_tools(config) }),
         "tools/call" => {
             let params = request.get("params").cloned().unwrap_or(Value::Null);
@@ -18668,6 +18688,60 @@ fn call_mcp_tool(engine: &MemoryEngine, params: Value, config: &McpRuntimeConfig
         redact_json_value(&mut safe_outcome);
     }
     Ok(mcp_text(serde_json::to_string_pretty(&safe_outcome)?))
+}
+
+fn mcp_resources() -> Vec<Value> {
+    vec![
+        json!({ "uri": "memory://status", "name": "Workspace status", "mimeType": "text/plain" }),
+        json!({ "uri": "memory://pack/latest", "name": "Latest context pack", "mimeType": "text/markdown" }),
+        json!({ "uri": "memory://doctor/latest", "name": "Latest doctor report", "mimeType": "application/json" }),
+        json!({ "uri": "memory://rules", "name": "Mistake firewall rules", "mimeType": "text/plain" }),
+        json!({ "uri": "memory://mistakes", "name": "Recent mistakes", "mimeType": "text/plain" }),
+        json!({ "uri": "memory://profile", "name": "Local profile memory", "mimeType": "text/plain" }),
+        json!({ "uri": "memory://project-state", "name": "Project state summary", "mimeType": "text/plain" })
+    ]
+}
+
+fn read_mcp_resource(engine: &MemoryEngine, uri: &str) -> Result<String> {
+    match uri {
+        "memory://status" => {
+            let count = engine.search(RecallQuery::new("memory").limit(1000).include_content(false))?.len();
+            Ok(format!(
+                "memory.cpp local vault\nstore: {}\nmemories: {count}",
+                engine.store_path().display()
+            ))
+        }
+        "memory://pack/latest" => {
+            let report = build_ai_context_report(engine, "repo context", "generic", 1500, None)?;
+            Ok(report.compiled_prompt)
+        }
+        "memory://doctor/latest" => {
+            let report = build_ai_context_report(engine, "repo context", "openai", 1500, None)?;
+            Ok(serde_json::to_string_pretty(&json!({
+                "compiled_tokens": report.compiled_tokens,
+                "raw_tokens": report.raw_tokens,
+                "omitted_tokens": report.omitted_tokens,
+                "secret_like_blocks": report.secret_like_blocks
+            }))?)
+        }
+        "memory://rules" | "memory://mistakes" => {
+            let items = engine.search(RecallQuery::new(if uri.ends_with("mistakes") { "mistake" } else { "rule" }).limit(20).include_content(true))?;
+            Ok(items
+                .into_iter()
+                .map(|item| item.memory.content.clone())
+                .collect::<Vec<_>>()
+                .join("\n---\n"))
+        }
+        "memory://profile" | "memory://project-state" => {
+            let items = engine.search(RecallQuery::new("project state profile").limit(15).include_content(true))?;
+            Ok(items
+                .into_iter()
+                .map(|item| format!("[{}] {}", item.memory.id, item.memory.content))
+                .collect::<Vec<_>>()
+                .join("\n"))
+        }
+        other => Err(anyhow!("unknown resource uri: {other}")),
+    }
 }
 
 fn mcp_tools(config: &McpRuntimeConfig) -> Vec<Value> {

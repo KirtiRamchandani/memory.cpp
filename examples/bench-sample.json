@@ -1,0 +1,11 @@
+{
+  "generatedAt": "2026-06-11T00:00:00.000Z",
+  "note": "Sample benchmark shape from memory bench --json. Values are illustrative fixtures for docs.",
+  "compiled_tokens": 1420,
+  "raw_tokens": 84000,
+  "omitted_tokens": 76780,
+  "estimated_kv_positions_avoided": 82580,
+  "signal_density_multiplier": 8.4,
+  "duplicate_tokens_blocked": 18400,
+  "stale_tokens_blocked": 9200
+}

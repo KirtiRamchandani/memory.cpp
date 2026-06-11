@@ -1,0 +1,14 @@
+$ memory wow
+memory wow complete
+report: .memory.cpp/reports/wow/wow-report.md
+pack: .memory.cpp/reports/wow/codex-pack.md
+doctor: .memory.cpp/reports/wow/doctor.json
+bench: .memory.cpp/reports/wow/bench.json
+dashboard: .memory.cpp/reports/wow/dashboard.html
+
+TOKEN REPORT
+Raw context available: 84,000 tokens
+Compiled context: 1,420 tokens
+Omitted: 76,780 tokens
+Estimated KV pressure avoided: 82,580 token positions
+Signal density improvement: 8.4x

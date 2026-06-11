@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420">
+  <rect width="960" height="420" rx="16" fill="#0d1117"/>
+  <text x="32" y="48" fill="#58a6ff" font-size="28" font-family="Consolas, monospace" font-weight="700">memory.cpp demo</text>
+  <text x="32" y="92" fill="#c9d1d9" font-size="16" font-family="Consolas, monospace">$ memory wow</text>
+  <text x="32" y="122" fill="#7ee787" font-size="16" font-family="Consolas, monospace">Compiled context: 1,420 tokens</text>
+  <text x="32" y="152" fill="#7ee787" font-size="16" font-family="Consolas, monospace">Omitted: 76,780 tokens</text>
+  <text x="32" y="182" fill="#ffa657" font-size="16" font-family="Consolas, monospace">Signal density improvement: 8.4x</text>
+  <text x="32" y="232" fill="#c9d1d9" font-size="16" font-family="Consolas, monospace">$ memory doctor "fix billing export bug" --provider openai</text>
+  <text x="32" y="262" fill="#7ee787" font-size="16" font-family="Consolas, monospace">Inference Cost Stack generated locally</text>
+  <text x="32" y="312" fill="#8b949e" font-size="14" font-family="Consolas, monospace">Remember more. Send less. Run faster.</text>
+</svg>

@@ -1,0 +1,14 @@
+version: 1
+name: memory.cpp smoke suite
+description: Default local memory validation checks for launch readiness.
+tests:
+  - name: doctor baseline
+    command: memory doctor
+  - name: agents readiness
+    command: memory agents-score
+  - name: compile pack
+    command: memory compile "fix billing export bug" --provider openai --budget 1500
+  - name: token firewall
+    command: memory token-firewall --dry-run
+  - name: workspace stats
+    command: memory stats

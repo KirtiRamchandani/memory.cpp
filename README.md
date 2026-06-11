@@ -12,6 +12,10 @@
 
 Remember more. Send less. Run faster.
 
+<p align="center">
+  <img src="assets/memorycpp-demo.svg" alt="memory.cpp terminal demo" width="720" />
+</p>
+
 Stop paying AI to reread the same context. `memory.cpp` compiles local repo memory into smaller, safer task packs so AI tools get the right context without stale decisions, duplicated logs, or accidental secrets.
 
 ## Hot topics

@@ -2707,6 +2707,7 @@ fn print_extended_help() -> Result<()> {
     println!(
         "  cache-manifest <task> --provider anthropic   Machine-readable cacheable-region manifest"
     );
+    println!("  ir inspect <task>               Lower retrieved memory into typed MemoryIR blocks");
     println!("  runtime-plan <task> --runtime generic|llama.cpp|ollama|vllm|sglang");
     println!("  savings | roi | leaderboard     Approximate token/cost/reuse summaries");
     println!();
@@ -2886,6 +2887,10 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
         "cache-manifest" => {
             let engine = build_engine_from_options(&options)?;
             cache_manifest_command(&engine, &rest)?;
+        }
+        "ir" => {
+            let engine = build_engine_from_options(&options)?;
+            ir_command(&engine, &rest)?;
         }
         "kv-report" => {
             let engine = build_engine_from_options(&options)?;
@@ -3773,6 +3778,7 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "firewall",
         "cache-plan",
         "cache-manifest",
+        "ir",
         "kv-report",
         "prefill-report",
         "kv-budget",
@@ -12971,6 +12977,76 @@ fn cache_manifest_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> 
         println!(
             "estimated KV positions avoided: {}",
             manifest.estimated_kv_positions_avoided
+        );
+    }
+    Ok(())
+}
+
+/// Retrieve the candidate memories used by the context compiler for a task.
+/// Shared by the IR inspector and other v2 commands so they all see the same
+/// retrieval the compiler does.
+fn retrieve_candidates(
+    engine: &MemoryEngine,
+    task: &str,
+) -> Result<Vec<memory_core::RetrievedMemory>> {
+    let workspace = current_workspace_name(engine)?.unwrap_or_else(|| "default".to_string());
+    let query_text =
+        format!("{task} decisions failures fixes rules mistakes commands files risks context");
+    let candidates = engine.search(
+        RecallQuery::new(query_text)
+            .workspace(workspace)
+            .limit(48)
+            .candidate_pool(96)
+            .include_content(true)
+            .include_inactive(true),
+    )?;
+    Ok(candidates)
+}
+
+/// `memory ir inspect "<task>"` — lower retrieved memory into MemoryIR and show
+/// the typed blocks, their cache roles, volatility, and scores.
+fn ir_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    // Accept "ir inspect <task>" and "ir <task>".
+    let rest: Vec<String> = if rest.first().map(|s| s.as_str()) == Some("inspect") {
+        rest[1..].to_vec()
+    } else {
+        rest.to_vec()
+    };
+    let task = task_from_rest(&rest, "current task");
+    let candidates = retrieve_candidates(engine, &task)?;
+    let ir = memory_core::MemoryIr::from_retrieved(&candidates);
+
+    if cli_flag(&rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&ir.to_json())?);
+        return Ok(());
+    }
+
+    println!("MemoryIR for task: {task}");
+    println!(
+        "blocks: {}  (stable: {}, fresh: {}, excluded: {})  total ~{} tokens",
+        ir.blocks.len(),
+        ir.stable_blocks().count(),
+        ir.fresh_blocks().count(),
+        ir.excluded_blocks().count(),
+        ir.total_tokens()
+    );
+    for block in &ir.blocks {
+        let mark = block
+            .exclusion_reason
+            .as_ref()
+            .map(|r| format!(" [excluded: {r}]"))
+            .unwrap_or_default();
+        println!(
+            "- {} {} role={} vol={} ~{}t util={:.2} fresh={:.2} trust={:.2}{}",
+            block.id,
+            block.kind.as_str(),
+            block.cache_role.as_str(),
+            block.volatility_score,
+            block.token_count,
+            block.utility_score,
+            block.freshness_score,
+            block.trust_score,
+            mark,
         );
     }
     Ok(())

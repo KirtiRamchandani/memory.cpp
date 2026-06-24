@@ -8,6 +8,7 @@ mod error;
 mod eval;
 mod graph;
 mod import;
+mod ir;
 mod map;
 mod prefix;
 mod ranker;
@@ -36,6 +37,7 @@ pub use import::{
     check_ignored_path, collect_importable_files, import_path, parse_file, ImportFormat,
     ImportOptions, ImportReport, DEFAULT_MEMORYIGNORE,
 };
+pub use ir::{CacheRole, IrBlock, IrKind, MemoryIr, Volatility};
 pub use map::{
     MapCitation, MapDiff, MapEdge, MapEdgeKind, MapNode, MapNodeChange, MapNodeClass,
     MapOutputFormat, MapRequest, MapType, MemoryMap,

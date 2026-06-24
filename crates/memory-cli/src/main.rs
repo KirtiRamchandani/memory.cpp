@@ -2732,6 +2732,10 @@ fn print_extended_help() -> Result<()> {
     println!("  paper run|tables|export|figures    Generate paper-ready CAMC-Bench artifacts");
     println!("  rehydrate mem://file/<path>#L10-L50  Expand a compact handle to exact code");
     println!("  minimize <task> --must-include a,b   Smallest sufficient context subset");
+    println!("  debt [--fix-plan|--badge]       Context debt score with a fix plan");
+    println!("  autopsy <task> [--missing a,b]  Explain likely context-side failure causes");
+    println!("  fuzz-context <task>             Stress-test a pack; robustness + essential blocks");
+    println!("  poison | write-firewall         Simulate memory-poisoning; screen risky writes");
     println!("  runtime-plan <task> --runtime generic|llama.cpp|ollama|vllm|sglang");
     println!("  savings | roi | leaderboard     Approximate token/cost/reuse summaries");
     println!();
@@ -2966,6 +2970,24 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
         "minimize" => {
             let engine = build_engine_from_options(&options)?;
             minimize_command(&engine, &rest)?;
+        }
+        "debt" => {
+            let engine = build_engine_from_options(&options)?;
+            debt_command(&engine, &rest)?;
+        }
+        "autopsy" => {
+            let engine = build_engine_from_options(&options)?;
+            autopsy_command(&engine, &rest)?;
+        }
+        "fuzz-context" => {
+            let engine = build_engine_from_options(&options)?;
+            fuzz_context_command(&engine, &rest)?;
+        }
+        "poison" => {
+            poison_command(&rest)?;
+        }
+        "write-firewall" => {
+            write_firewall_command(&rest)?;
         }
         "kv-report" => {
             let engine = build_engine_from_options(&options)?;
@@ -3877,6 +3899,11 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "paper",
         "rehydrate",
         "minimize",
+        "debt",
+        "autopsy",
+        "fuzz-context",
+        "poison",
+        "write-firewall",
         "kv-report",
         "prefill-report",
         "kv-budget",
@@ -13753,6 +13780,247 @@ fn minimize_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
         println!("essential: {}", result.essential_ids.join(", "));
         if !result.removed_ids.is_empty() {
             println!("removed {} blocks", result.removed_ids.len());
+        }
+    }
+    Ok(())
+}
+
+/// `memory debt [--json] [--fix-plan] [--badge]` — context debt score.
+fn debt_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let memories = engine.all_memories(None, true)?;
+    let total = memories.len();
+    let stale = memories
+        .iter()
+        .filter(|m| {
+            matches!(
+                m.attributes.status,
+                MemoryStatus::Superseded | MemoryStatus::Contradicted | MemoryStatus::Archived
+            )
+        })
+        .count();
+    let contradictions = memories
+        .iter()
+        .filter(|m| m.attributes.contradiction_count > 0)
+        .count();
+    let secrets = memories
+        .iter()
+        .filter(|m| m.derived.sensitivity > 0.6)
+        .count();
+    let unverified = memories
+        .iter()
+        .filter(|m| {
+            m.importance > 0.7 && m.attributes.confidence < 0.5 && m.attributes.source.is_none()
+        })
+        .count();
+    let report = memory_core::debt_score(memory_core::DebtFactors {
+        stale_memories: stale,
+        unresolved_contradictions: contradictions,
+        duplicate_memories: 0,
+        unverified_high_impact: unverified,
+        secret_risk_memories: secrets,
+        unstable_prefix_rate: 0.0,
+        trace_bloat_blocks: 0,
+        outdated_test_recipes: 0,
+        total_memories: total,
+    });
+
+    if cli_flag(rest, "--badge") {
+        println!(
+            "![context debt](https://img.shields.io/badge/context_debt-{}%2F100-{})",
+            report.score,
+            if report.score < 40 {
+                "brightgreen"
+            } else if report.score < 70 {
+                "yellow"
+            } else {
+                "red"
+            }
+        );
+        return Ok(());
+    }
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&report.to_json())?);
+        return Ok(());
+    }
+    println!("Context Debt: {}/100  ({})", report.score, report.grade);
+    if !report.top_causes.is_empty() {
+        println!("Main causes:");
+        for c in &report.top_causes {
+            println!("  - {c}");
+        }
+    }
+    if cli_flag(rest, "--fix-plan") || !report.fix_plan.is_empty() {
+        println!("Fix plan:");
+        for (i, f) in report.fix_plan.iter().enumerate() {
+            println!("  {}. {f}", i + 1);
+        }
+    }
+    Ok(())
+}
+
+/// `memory autopsy "<task>" [--missing a,b] [--budget N]` — explain likely
+/// context-side failure causes for a task's compiled pack.
+fn autopsy_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let budget = option_usize(rest, "--budget", 1500);
+    let report = build_ai_context_report(engine, &task, "generic", budget, None)?;
+    let candidates = retrieve_candidates(engine, &task)?;
+    let ir = memory_core::MemoryIr::from_retrieved(&candidates);
+    let missing: Vec<String> = cli_flag_value(rest, "--missing")
+        .map(|v| {
+            v.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let autopsy = memory_core::autopsy_analyze(&memory_core::AutopsyInput {
+        blocks: &ir.blocks,
+        budget,
+        compiled_tokens: report.compiled_tokens,
+        missing_essentials: &missing,
+    });
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&autopsy.to_json())?);
+    } else {
+        println!("autopsy: {task}");
+        match &autopsy.likely_failure {
+            Some(f) => println!("likely failure: {f}"),
+            None => println!("no obvious context-side failure causes found"),
+        }
+        for f in &autopsy.findings {
+            println!("- [{}] {}: {}", f.severity, f.category, f.detail);
+            println!("    fix: {}", f.fix);
+        }
+    }
+    Ok(())
+}
+
+/// `memory fuzz-context "<task>" [--must-include a,b]` — stress-test a pack.
+fn fuzz_context_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let budget = option_usize(rest, "--budget", 1500);
+    let required: Vec<String> = cli_flag_value(rest, "--must-include")
+        .map(|v| {
+            v.split(',')
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let candidates = retrieve_candidates(engine, &task)?;
+    let blocks: Vec<memory_core::FuzzBlock> = candidates
+        .iter()
+        .take(12)
+        .map(|c| memory_core::FuzzBlock {
+            id: c.memory.id.clone(),
+            text: memory_text(&c.memory),
+            tokens: estimate_tokens(&memory_text(&c.memory)),
+        })
+        .collect();
+    let report = memory_core::fuzz(&blocks, budget, |kept| {
+        let joined = kept
+            .iter()
+            .map(|b| b.text.to_lowercase())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let has_required = required.iter().all(|r| joined.contains(r));
+        let safe = !joined.contains("ignore previous instructions");
+        has_required && safe
+    });
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&report.to_json())?);
+    } else {
+        println!("context fuzzing: {task}");
+        println!(
+            "robustness: {:.0}% ({}/{} mutations survived)",
+            report.robustness_score * 100.0,
+            report.mutations_survived,
+            report.mutations_run
+        );
+        println!("min safe tokens: {}", report.min_safe_tokens);
+        if !report.essential_blocks.is_empty() {
+            println!("essential blocks: {}", report.essential_blocks.join(", "));
+        }
+        for f in &report.failure_conditions {
+            println!("  ! {f}");
+        }
+    }
+    Ok(())
+}
+
+/// `memory poison simulate|benchmark` and `memory write-firewall`.
+fn poison_command(rest: &[String]) -> Result<()> {
+    let outcomes = memory_core::poison_benchmark();
+    let correct = outcomes.iter().filter(|o| o.correct).count();
+    if cli_flag(rest, "--json") {
+        let arr: Vec<Value> = outcomes
+            .iter()
+            .map(|o| {
+                json!({
+                    "scenario": o.scenario,
+                    "expected_block": o.expected_block,
+                    "blocked": o.blocked,
+                    "action": o.action,
+                    "correct": o.correct,
+                    "reasons": o.reasons,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &json!({ "accuracy": format!("{correct}/{}", outcomes.len()), "scenarios": arr })
+            )?
+        );
+    } else {
+        println!("memory poisoning simulator");
+        for o in &outcomes {
+            println!(
+                "- {:<22} expected={} -> {} [{}]",
+                o.scenario,
+                if o.expected_block { "block" } else { "allow" },
+                if o.blocked { "blocked" } else { "allowed" },
+                if o.correct { "ok" } else { "MISS" }
+            );
+        }
+        println!("detection accuracy: {correct}/{}", outcomes.len());
+    }
+    Ok(())
+}
+
+/// `memory write-firewall --text "..."` or `--candidate file.json`.
+fn write_firewall_command(rest: &[String]) -> Result<()> {
+    let candidate = if let Some(path) = cli_flag_path(rest, "--candidate") {
+        let raw = fs::read_to_string(path)?;
+        serde_json::from_str::<memory_core::WriteCandidate>(&raw)?
+    } else {
+        memory_core::WriteCandidate {
+            text: cli_flag_value(rest, "--text").unwrap_or_default(),
+            source: cli_flag_value(rest, "--source"),
+            confidence: cli_flag_value(rest, "--confidence")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.8),
+        }
+    };
+    let verdict = memory_core::screen_write(&candidate);
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&verdict.to_json())?);
+    } else {
+        println!(
+            "write firewall: {} ({})",
+            if verdict.blocked {
+                "BLOCKED"
+            } else {
+                "allowed"
+            },
+            verdict.action
+        );
+        for r in &verdict.reasons {
+            println!("  - {r}");
+        }
+        if let Some(p) = &verdict.recommended_policy {
+            println!("policy: {p}");
         }
     }
     Ok(())

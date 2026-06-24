@@ -7,9 +7,9 @@ It does this without a cloud account or a new service. Entities, sessions, event
 ## Create Entities
 
 ```bash
-memory entity create --type agent --name Codex
-memory entity create --type project --name memory.cpp
-memory entity link Codex memory.cpp --relation works_on
+memory entity create --type person --name Ada
+memory entity create --type project --name checkout-service
+memory entity link Ada checkout-service --relation maintains
 memory entity list
 ```
 
@@ -17,13 +17,13 @@ Expected output shape:
 
 ```text
 entity stored: <memory-id>
-name: Codex
-type: agent
+name: Ada
+type: person
 
 entity relation stored: <memory-id>
 ```
 
-What happened: memory.cpp stored the agent, project, and relation locally as evidence-backed memories. Nothing was uploaded.
+What happened: memory.cpp stored the person, project, and relation locally as evidence-backed memories. Nothing was uploaded.
 
 ## Record A Session
 

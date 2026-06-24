@@ -254,9 +254,9 @@ memory memories list
 memory memories show <memory_id>
 memory memories export --format json --output .memory.cpp/memories.json
 memory profile update "Prefers concise PR summaries" --scope user
-memory entity create --type agent --name Codex
-memory entity create --type project --name memory.cpp
-memory entity link Codex memory.cpp --relation works_on
+memory entity create --type person --name Ada
+memory entity create --type project --name checkout-service
+memory entity link Ada checkout-service --relation maintains
 memory session start --name release-polish --goal "finish launch readiness"
 memory session add-event --type test --text "cargo test passed"
 memory session summarize

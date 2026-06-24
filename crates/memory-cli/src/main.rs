@@ -2715,6 +2715,13 @@ fn print_extended_help() -> Result<()> {
     println!("  prove [--memory <id>]           Freshness-prove memories against current sources");
     println!("  audit-stale                     List memories that fail their freshness proof");
     println!("  explain-exclusions <task>       Why context was excluded (stale/secret/negative)");
+    println!("  tokens <task> --provider openai|anthropic|generic   Provider-tuned token estimate");
+    println!(
+        "  kv-sim <task> --model llama-3.1-8b [--runtime vllm]  Estimate raw vs compiled KV bytes"
+    );
+    println!(
+        "  optimize <task> --objective kv_efficiency|-O3|-Oz    KV-aware utility/cost selection"
+    );
     println!("  runtime-plan <task> --runtime generic|llama.cpp|ollama|vllm|sglang");
     println!("  savings | roi | leaderboard     Approximate token/cost/reuse summaries");
     println!();
@@ -2914,6 +2921,18 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
         "explain-exclusions" => {
             let engine = build_engine_from_options(&options)?;
             explain_exclusions_command(&engine, &rest)?;
+        }
+        "tokens" => {
+            let engine = build_engine_from_options(&options)?;
+            tokens_command(&engine, &rest)?;
+        }
+        "kv-sim" => {
+            let engine = build_engine_from_options(&options)?;
+            kv_sim_command(&engine, &rest)?;
+        }
+        "optimize" => {
+            let engine = build_engine_from_options(&options)?;
+            optimize_command(&engine, &rest)?;
         }
         "kv-report" => {
             let engine = build_engine_from_options(&options)?;
@@ -3806,6 +3825,9 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "prove",
         "audit-stale",
         "explain-exclusions",
+        "tokens",
+        "kv-sim",
+        "optimize",
         "kv-report",
         "prefill-report",
         "kv-budget",
@@ -13435,6 +13457,167 @@ fn explain_exclusions_command(engine: &MemoryEngine, rest: &[String]) -> Result<
         }
         if excluded.is_empty() {
             println!("  no exclusions — all retrieved memory is clean and fresh");
+        }
+    }
+    Ok(())
+}
+
+/// `memory tokens [<task>] --provider openai|anthropic|generic` — count tokens
+/// of the compiled pack with a provider-tuned estimator, labeling estimates.
+fn tokens_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let report = build_ai_context_report(engine, &task, &provider, 1500, None)?;
+    let tk = memory_core::Tokenizer::for_provider(&provider);
+    let compiled = tk.count(&report.compiled_prompt);
+    let stable = tk.count(&report.stable_prefix);
+    let fresh = tk.count(&report.fresh_suffix);
+    let generic = memory_core::Tokenizer::Generic.count(&report.compiled_prompt);
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "provider": provider,
+                "compiled": compiled.to_json(),
+                "stable_prefix": stable.to_json(),
+                "fresh_suffix": fresh.to_json(),
+                "generic_estimate": generic.to_json(),
+            }))?
+        );
+    } else {
+        println!("token count for: {task}  (provider: {provider})");
+        println!(
+            "compiled prompt: ~{} tokens (estimate, {})",
+            compiled.tokens,
+            if compiled.measured {
+                "measured"
+            } else {
+                "approx"
+            }
+        );
+        println!("  stable prefix: ~{} tokens", stable.tokens);
+        println!("  fresh suffix:  ~{} tokens", fresh.tokens);
+        println!("generic estimate: ~{} tokens", generic.tokens);
+        println!("note: counts are estimates unless a provider tokenizer is enabled.");
+    }
+    Ok(())
+}
+
+/// `memory kv-sim [<task>] --model llama-3.1-8b [--runtime vllm]` — estimate KV
+/// bytes for raw vs compiled context. Honest estimate, not a measurement.
+fn kv_sim_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let model_name = cli_flag_value(rest, "--model").unwrap_or_else(|| "llama-3.1-8b".to_string());
+    let mut profile = match cli_flag_path(rest, "--profile") {
+        Some(path) => {
+            let raw = fs::read_to_string(path)?;
+            serde_json::from_str::<memory_core::ModelProfile>(&raw)?
+        }
+        None => memory_core::ModelProfile::preset(&model_name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "unknown model '{model_name}'. Try llama-3.1-8b, llama-3.1-70b, mistral-7b, qwen2.5-7b, generic-7b, or pass --profile <file.json>"
+            )
+        })?,
+    };
+    if let Some(runtime) = cli_flag_value(rest, "--runtime") {
+        profile = profile.with_runtime(&runtime);
+    }
+    let report = build_ai_context_report(engine, &task, "generic", 1500, None)?;
+    let comparison = memory_core::KvComparison::new(
+        &profile,
+        report.raw_tokens,
+        report.compiled_tokens,
+        report.cacheable_prefix_tokens,
+        report.fresh_suffix_tokens,
+    );
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&comparison.to_json())?);
+    } else {
+        println!("KV SIMULATION (estimate) — model: {}", comparison.model);
+        println!("raw tokens:      {}", comparison.raw_tokens);
+        println!("compiled tokens: {}", comparison.compiled_tokens);
+        println!(
+            "  stable prefix: {}   fresh suffix: {}",
+            comparison.stable_prefix_tokens, comparison.fresh_suffix_tokens
+        );
+        println!(
+            "estimated KV raw:      {:.1} MiB",
+            memory_core::mib(comparison.estimated_kv_bytes_raw)
+        );
+        println!(
+            "estimated KV compiled: {:.1} MiB",
+            memory_core::mib(comparison.estimated_kv_bytes_compiled)
+        );
+        println!(
+            "estimated KV avoided:  {:.1} MiB ({:.1}%)",
+            memory_core::mib(comparison.estimated_kv_bytes_avoided),
+            comparison.estimated_kv_percent_reduction
+        );
+        println!("{}", comparison.note);
+    }
+    Ok(())
+}
+
+/// `memory optimize <task> [--objective kv_efficiency] [-O3] [--budget N]
+/// [--max-kv-mb M] [--model llama-3.1-8b]` — run the KV-aware optimizer over the
+/// task's MemoryIR and show what was selected/excluded and why.
+fn optimize_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let budget = option_usize(rest, "--budget", 1500);
+
+    // Resolve objective: -O level wins, then --objective, else minimal_sufficient.
+    let opt_level = rest.iter().find_map(|a| memory_core::OptLevel::parse(a));
+    let objective = opt_level.map(|l| l.objective()).unwrap_or_else(|| {
+        cli_flag_value(rest, "--objective")
+            .and_then(|o| memory_core::Objective::parse(&o))
+            .unwrap_or(memory_core::Objective::MinimalSufficient)
+    });
+
+    let kv_bytes_per_token = cli_flag_value(rest, "--model")
+        .and_then(|m| memory_core::ModelProfile::preset(&m))
+        .map(|p| p.kv_bytes(1))
+        .unwrap_or(0);
+    let max_kv_bytes = cli_flag_value(rest, "--max-kv-mb")
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|mb| mb * 1024 * 1024);
+
+    let candidates = retrieve_candidates(engine, &task)?;
+    let ir = memory_core::MemoryIr::from_retrieved(&candidates);
+    let result = memory_core::optimize(
+        &ir.blocks,
+        &memory_core::OptimizerConfig {
+            objective,
+            token_budget: budget,
+            max_kv_bytes,
+            kv_bytes_per_token,
+        },
+    );
+
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&result.to_json())?);
+        return Ok(());
+    }
+    println!("optimize: {task}");
+    println!(
+        "objective: {}{}  budget: {} tokens  selected: {} tokens",
+        result.objective,
+        opt_level
+            .map(|l| format!(" ({})", l.as_str()))
+            .unwrap_or_default(),
+        result.token_budget,
+        result.selected_tokens
+    );
+    println!("included ({}):", result.selected.len());
+    for b in &result.selected {
+        println!(
+            "  + {} {} role={} ~{}t score={:.4} — {}",
+            b.id, b.kind, b.cache_role, b.tokens, b.score, b.reason
+        );
+    }
+    if !result.excluded.is_empty() {
+        println!("excluded ({}):", result.excluded.len());
+        for b in &result.excluded {
+            println!("  - {} {} ~{}t — {}", b.id, b.kind, b.tokens, b.reason);
         }
     }
     Ok(())

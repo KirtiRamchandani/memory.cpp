@@ -122,6 +122,8 @@ pub struct IrBlock {
     pub source_commit: Option<String>,
     pub content_hash: String,
     pub token_count: usize,
+    /// Retrieval relevance to the current task (from the recall score).
+    pub relevance_score: f32,
     pub utility_score: f32,
     pub freshness_score: f32,
     pub trust_score: f32,
@@ -249,6 +251,7 @@ impl IrBlock {
             id,
             content_hash: hash,
             token_count: approx_tokens(&text),
+            relevance_score: item.score,
             kind,
             source_memory_id: Some(memory.id.clone()),
             source_file,

@@ -10,11 +10,14 @@ mod freshness;
 mod graph;
 mod import;
 mod ir;
+mod kv_model;
 mod map;
 mod negative;
+mod optimizer;
 mod prefix;
 mod ranker;
 mod storage;
+mod tokenizer;
 mod types;
 mod vector;
 
@@ -44,16 +47,21 @@ pub use import::{
     ImportOptions, ImportReport, DEFAULT_MEMORYIGNORE,
 };
 pub use ir::{CacheRole, IrBlock, IrKind, MemoryIr, Volatility};
+pub use kv_model::{mib, KvComparison, ModelProfile};
 pub use map::{
     MapCitation, MapDiff, MapEdge, MapEdgeKind, MapNode, MapNodeChange, MapNodeClass,
     MapOutputFormat, MapRequest, MapType, MemoryMap,
 };
 pub use negative::{NegativeKind, NegativeMemory, NegativeMemoryStore};
+pub use optimizer::{
+    optimize, Objective, OptLevel, OptimizationResult, OptimizerConfig, ScoredBlock,
+};
 pub use prefix::{
     canonicalize_stable_prefix, content_hash, pack_id, render_fresh_suffix, stable_prefix_hash,
     FreshSuffixInput, StablePrefixInput, PACK_VERSION, STABLE_PREFIX_VERSION,
 };
 pub use ranker::{RankFeatures, Ranker, RankerConfig};
+pub use tokenizer::{estimate_tokens, TokenCount, Tokenizer, TokenizerMode};
 pub use types::{
     attributes_from_metadata, derive_memory_scores, metadata_for_storage, ConflictRecord,
     EntityStat, ExplainTrace, InboxEntry, MemoryAttributes, MemoryDerivedScores, MemoryDiff,

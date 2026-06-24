@@ -1,4 +1,5 @@
 mod api;
+mod bench;
 mod cache_manifest;
 mod compression;
 mod config;
@@ -32,6 +33,7 @@ pub use api::{
     MemoryRecordOptions, PrefillReport, RuntimePlanOptions, RuntimePlanReport, SignalDensityReport,
     TokenFirewallReport,
 };
+pub use bench::{run as run_camc_bench, BenchReport, Strategy, StrategyResult};
 pub use cache_manifest::{compiler_version, CacheManifest, CacheManifestInput, CacheRegion};
 pub use compression::{CompressionConfig, Compressor, HeuristicCompressor};
 pub use config::EngineConfig;

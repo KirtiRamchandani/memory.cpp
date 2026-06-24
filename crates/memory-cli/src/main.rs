@@ -2726,6 +2726,10 @@ fn print_extended_help() -> Result<()> {
     println!("  ledger latest|show <id>|export  Prompt provenance audit trail");
     println!("  reproduce [<task>]              Verify a pack reproduces from the lockfile");
     println!("  verify-pack <file>              Check a pack file against the ledger");
+    println!(
+        "  bench camc | bench report --html   CAMC-Bench: compare strategies on a fixture corpus"
+    );
+    println!("  paper run|tables|export|figures    Generate paper-ready CAMC-Bench artifacts");
     println!("  runtime-plan <task> --runtime generic|llama.cpp|ollama|vllm|sglang");
     println!("  savings | roi | leaderboard     Approximate token/cost/reuse summaries");
     println!();
@@ -3027,7 +3031,16 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
         }
         "bench" => {
             let engine = build_engine_from_options(&options)?;
-            bench_context_command(&engine, &rest)?;
+            match rest.first().map(|s| s.as_str()) {
+                Some("camc") | Some("compare") | Some("report") => {
+                    camc_bench_command(&engine, &rest)?
+                }
+                _ => bench_context_command(&engine, &rest)?,
+            }
+        }
+        "paper" => {
+            let engine = build_engine_from_options(&options)?;
+            paper_command(&engine, &rest)?;
         }
         "explain-compile" => {
             let engine = build_engine_from_options(&options)?;
@@ -3852,6 +3865,7 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "reproduce",
         "ledger",
         "verify-pack",
+        "paper",
         "kv-report",
         "prefill-report",
         "kv-budget",
@@ -13645,6 +13659,181 @@ fn optimize_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Directory for generated reports/artifacts (.memory.cpp/reports).
+fn reports_dir(engine: &MemoryEngine) -> PathBuf {
+    engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("reports")
+}
+
+/// `memory bench camc|compare [--model M] [--budget N] [--json]`
+/// `memory bench report --html` — write an HTML CAMC-Bench report.
+fn camc_bench_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let model = cli_flag_value(rest, "--model").unwrap_or_else(|| "llama-3.1-8b".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let report = memory_core::run_camc_bench(&model, budget);
+    let sub = rest.first().map(|s| s.as_str()).unwrap_or("camc");
+
+    if sub == "report" || cli_flag(rest, "--html") {
+        let dir = reports_dir(engine);
+        fs::create_dir_all(&dir)?;
+        let path = dir.join("camc-bench.html");
+        fs::write(&path, render_bench_html(&report))?;
+        println!("wrote {}", path.display());
+        return Ok(());
+    }
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&report.to_json())?);
+    } else {
+        println!("{}", report.to_table());
+    }
+    Ok(())
+}
+
+fn render_bench_html(report: &memory_core::BenchReport) -> String {
+    let mut rows = String::new();
+    for r in &report.results {
+        let highlight = if r.strategy == "full CAMC" {
+            " style=\"background:#eef9f0;font-weight:600\""
+        } else {
+            ""
+        };
+        rows.push_str(&format!(
+            "<tr{highlight}><td>{}</td><td>{}</td><td>{}</td><td>{:.1}%</td><td>{}</td><td>{}</td><td>{}</td><td>{}/{}</td></tr>",
+            r.strategy, r.total_tokens, r.cacheable_prefix_tokens, r.token_reduction_vs_raw_percent,
+            r.stale_included, r.contradictions_included, r.secret_leakage, r.tasks_passed, r.tasks_total
+        ));
+    }
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>CAMC-Bench</title>\
+<style>body{{font-family:system-ui,sans-serif;margin:2rem;color:#111}}table{{border-collapse:collapse;width:100%}}\
+th,td{{border:1px solid #ddd;padding:.5rem .75rem;text-align:right}}th:first-child,td:first-child{{text-align:left}}\
+th{{background:#0b1020;color:#fff}}h1{{margin-bottom:.2rem}}.note{{color:#555;font-size:.9rem;margin-top:1rem}}</style></head>\
+<body><h1>CAMC-Bench</h1><p>Cache-Aware Memory Compilation for Coding Agents — model {}, budget {}.</p>\
+<table><thead><tr><th>Strategy</th><th>Tokens</th><th>Cacheable prefix</th><th>Reduction vs raw</th>\
+<th>Stale</th><th>Contradictions</th><th>Secrets</th><th>Task success</th></tr></thead><tbody>{}</tbody></table>\
+<p class=\"note\">{}</p></body></html>",
+        report.model, report.budget, rows, report.note
+    )
+}
+
+/// `memory paper run|tables|export|figures|appendix` — generate paper-ready
+/// artifacts from CAMC-Bench into .memory.cpp/paper/.
+fn paper_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let sub = rest.first().map(|s| s.as_str()).unwrap_or("run");
+    let model = cli_flag_value(rest, "--model").unwrap_or_else(|| "llama-3.1-8b".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let report = memory_core::run_camc_bench(&model, budget);
+    let dir = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("paper");
+
+    match sub {
+        "tables" => println!("{}", report.to_markdown()),
+        "export" => println!("{}", serde_json::to_string_pretty(&report.to_json())?),
+        "appendix" => println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "benchmark": "CAMC-Bench",
+                "corpus": "synthetic bundled fixtures",
+                "model": report.model,
+                "budget": report.budget,
+                "results": report.results.iter().map(|r| r.to_json()).collect::<Vec<_>>(),
+            }))?
+        ),
+        "figures" => {
+            fs::create_dir_all(&dir)?;
+            let path = dir.join("reduction.svg");
+            fs::write(&path, render_reduction_svg(&report))?;
+            println!("wrote {}", path.display());
+        }
+        _ => {
+            // run: write all artifacts.
+            fs::create_dir_all(&dir)?;
+            fs::write(dir.join("tables.md"), report.to_markdown())?;
+            fs::write(
+                dir.join("report.json"),
+                serde_json::to_string_pretty(&report.to_json())?,
+            )?;
+            fs::write(
+                dir.join("methodology.json"),
+                serde_json::to_string_pretty(&json!({
+                    "benchmark": "CAMC-Bench",
+                    "description": "Deterministic comparison of context-selection strategies on a synthetic repo-memory corpus.",
+                    "strategies": ["raw full context","grep","BM25","embedding retrieval","CAMC ablations","full CAMC"],
+                    "metrics": ["tokens","cacheable_prefix_tokens","token_reduction_vs_raw","stale_included","contradictions_included","secret_leakage","task_success","estimated_kv_mib"],
+                    "oracle": "task passes iff all essential memory ids are included and no contradictions are included",
+                    "honesty": "Synthetic corpus; estimated KV is prompt-side, not provider KV-cache compression; runtime latency must be measured separately.",
+                    "model": report.model,
+                    "budget": report.budget,
+                }))?,
+            )?;
+            fs::write(dir.join("reduction.svg"), render_reduction_svg(&report))?;
+            fs::write(
+                dir.join("reproduce.sh"),
+                format!(
+                    "#!/usr/bin/env bash\n# Reproduce CAMC-Bench results.\nset -euo pipefail\ncargo run -q -p memory-cli -- bench camc --model {} --budget {} --json\n",
+                    report.model, report.budget
+                ),
+            )?;
+            println!("wrote paper artifacts to {}", dir.display());
+            println!("- tables.md, report.json, methodology.json, reduction.svg, reproduce.sh");
+        }
+    }
+    Ok(())
+}
+
+fn render_reduction_svg(report: &memory_core::BenchReport) -> String {
+    let width = 720;
+    let bar_h = 26;
+    let gap = 12;
+    let left = 220;
+    let top = 50;
+    let height = top + (report.results.len() as i32) * (bar_h + gap) + 40;
+    let max_tokens = report
+        .results
+        .iter()
+        .map(|r| r.total_tokens)
+        .max()
+        .unwrap_or(1)
+        .max(1) as f32;
+    let mut bars = String::new();
+    for (i, r) in report.results.iter().enumerate() {
+        let y = top + (i as i32) * (bar_h + gap);
+        let w = ((r.total_tokens as f32 / max_tokens) * (width - left - 80) as f32) as i32;
+        let color = if r.strategy == "full CAMC" {
+            "#2e9e5b"
+        } else {
+            "#5b7cfa"
+        };
+        bars.push_str(&format!(
+            "<text x=\"10\" y=\"{}\" font-size=\"12\" fill=\"#222\">{}</text>\
+<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"4\" fill=\"{}\"/>\
+<text x=\"{}\" y=\"{}\" font-size=\"12\" fill=\"#222\">{} tok</text>",
+            y + 18,
+            r.strategy,
+            left,
+            y,
+            w.max(1),
+            bar_h,
+            color,
+            left + w + 6,
+            y + 18,
+            r.total_tokens
+        ));
+    }
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">\
+<style>text{{font-family:system-ui,sans-serif}}</style>\
+<text x=\"10\" y=\"24\" font-size=\"16\" font-weight=\"700\">CAMC-Bench: total context tokens by strategy</text>\
+{bars}</svg>"
+    )
 }
 
 fn lock_path(engine: &MemoryEngine) -> PathBuf {

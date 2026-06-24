@@ -2730,6 +2730,8 @@ fn print_extended_help() -> Result<()> {
         "  bench camc | bench report --html   CAMC-Bench: compare strategies on a fixture corpus"
     );
     println!("  paper run|tables|export|figures    Generate paper-ready CAMC-Bench artifacts");
+    println!("  rehydrate mem://file/<path>#L10-L50  Expand a compact handle to exact code");
+    println!("  minimize <task> --must-include a,b   Smallest sufficient context subset");
     println!("  runtime-plan <task> --runtime generic|llama.cpp|ollama|vllm|sglang");
     println!("  savings | roi | leaderboard     Approximate token/cost/reuse summaries");
     println!();
@@ -2957,6 +2959,13 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
         "verify-pack" => {
             let engine = build_engine_from_options(&options)?;
             verify_pack_command(&engine, &rest)?;
+        }
+        "rehydrate" => {
+            rehydrate_command(&rest)?;
+        }
+        "minimize" => {
+            let engine = build_engine_from_options(&options)?;
+            minimize_command(&engine, &rest)?;
         }
         "kv-report" => {
             let engine = build_engine_from_options(&options)?;
@@ -3866,6 +3875,8 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "ledger",
         "verify-pack",
         "paper",
+        "rehydrate",
+        "minimize",
         "kv-report",
         "prefill-report",
         "kv-budget",
@@ -13656,6 +13667,92 @@ fn optimize_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
         println!("excluded ({}):", result.excluded.len());
         for b in &result.excluded {
             println!("  - {} {} ~{}t — {}", b.id, b.kind, b.tokens, b.reason);
+        }
+    }
+    Ok(())
+}
+
+/// `memory rehydrate mem://file/src/auth.rs#L10-L50` — expand a handle from disk.
+fn rehydrate_command(rest: &[String]) -> Result<()> {
+    let uri = rest
+        .iter()
+        .find(|a| a.starts_with("mem://"))
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("usage: memory rehydrate mem://file/<path>#L10-L50"))?;
+    let handle = memory_core::Handle::parse(&uri)
+        .ok_or_else(|| anyhow::anyhow!("could not parse handle: {uri}"))?;
+    let root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let result = memory_core::rehydrate_file(&root, &handle);
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "handle": result.handle,
+                "found": result.found,
+                "content": result.content,
+            }))?
+        );
+    } else if result.found {
+        println!("{}", result.content);
+    } else {
+        println!("could not rehydrate {}: {}", result.handle, result.content);
+    }
+    Ok(())
+}
+
+/// `memory minimize "<task>" --must-include "a,b"` — find the smallest subset of
+/// retrieved memory whose combined text still contains every required string.
+fn minimize_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let strategy = memory_core::MinStrategy::parse(
+        &cli_flag_value(rest, "--strategy").unwrap_or_else(|| "greedy".to_string()),
+    );
+    // Oracle: required substrings. Default to salient task words if unspecified.
+    let required: Vec<String> = match cli_flag_value(rest, "--must-include") {
+        Some(v) => v
+            .split(',')
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        None => task
+            .to_lowercase()
+            .split_whitespace()
+            .filter(|w| w.len() > 4)
+            .map(|s| s.to_string())
+            .collect(),
+    };
+
+    let candidates = retrieve_candidates(engine, &task)?;
+    let blocks: Vec<memory_core::MinBlock> = candidates
+        .iter()
+        .map(|c| memory_core::MinBlock {
+            id: c.memory.id.clone(),
+            text: memory_text(&c.memory),
+            tokens: estimate_tokens(&memory_text(&c.memory)),
+        })
+        .collect();
+
+    let result = memory_core::minimize(&blocks, strategy, |kept| {
+        let joined = kept
+            .iter()
+            .map(|b| b.text.to_lowercase())
+            .collect::<Vec<_>>()
+            .join(" ");
+        required.iter().all(|r| joined.contains(r))
+    });
+
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&result.to_json())?);
+    } else {
+        println!("minimal sufficient context for: {task}");
+        println!(
+            "raw: {} blocks / {} tokens  ->  minimized: {} blocks / {} tokens",
+            result.raw_blocks, result.raw_tokens, result.minimized_blocks, result.minimized_tokens
+        );
+        println!("oracle satisfied: {}", result.oracle_satisfied);
+        println!("essential: {}", result.essential_ids.join(", "));
+        if !result.removed_ids.is_empty() {
+            println!("removed {} blocks", result.removed_ids.len());
         }
     }
     Ok(())

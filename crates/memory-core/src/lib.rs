@@ -15,10 +15,12 @@ mod kv_model;
 mod ledger;
 mod lockfile;
 mod map;
+mod minimize;
 mod negative;
 mod optimizer;
 mod prefix;
 mod ranker;
+mod rehydrate;
 mod storage;
 mod tokenizer;
 mod types;
@@ -58,6 +60,7 @@ pub use map::{
     MapCitation, MapDiff, MapEdge, MapEdgeKind, MapNode, MapNodeChange, MapNodeClass,
     MapOutputFormat, MapRequest, MapType, MemoryMap,
 };
+pub use minimize::{minimize, MinBlock, MinStrategy, MinimizeResult};
 pub use negative::{NegativeKind, NegativeMemory, NegativeMemoryStore};
 pub use optimizer::{
     optimize, Objective, OptLevel, OptimizationResult, OptimizerConfig, ScoredBlock,
@@ -67,6 +70,7 @@ pub use prefix::{
     FreshSuffixInput, StablePrefixInput, PACK_VERSION, STABLE_PREFIX_VERSION,
 };
 pub use ranker::{RankFeatures, Ranker, RankerConfig};
+pub use rehydrate::{rehydrate_file, Handle, Rehydrated};
 pub use tokenizer::{estimate_tokens, TokenCount, Tokenizer, TokenizerMode};
 pub use types::{
     attributes_from_metadata, derive_memory_scores, metadata_for_storage, ConflictRecord,

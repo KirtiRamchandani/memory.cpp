@@ -2722,6 +2722,10 @@ fn print_extended_help() -> Result<()> {
     println!(
         "  optimize <task> --objective kv_efficiency|-O3|-Oz    KV-aware utility/cost selection"
     );
+    println!("  lock [<task>] | lock diff       Write/compare .memory.cpp/context.lock");
+    println!("  ledger latest|show <id>|export  Prompt provenance audit trail");
+    println!("  reproduce [<task>]              Verify a pack reproduces from the lockfile");
+    println!("  verify-pack <file>              Check a pack file against the ledger");
     println!("  runtime-plan <task> --runtime generic|llama.cpp|ollama|vllm|sglang");
     println!("  savings | roi | leaderboard     Approximate token/cost/reuse summaries");
     println!();
@@ -2933,6 +2937,22 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
         "optimize" => {
             let engine = build_engine_from_options(&options)?;
             optimize_command(&engine, &rest)?;
+        }
+        "lock" => {
+            let engine = build_engine_from_options(&options)?;
+            lock_command(&engine, &rest)?;
+        }
+        "reproduce" => {
+            let engine = build_engine_from_options(&options)?;
+            reproduce_command(&engine, &rest)?;
+        }
+        "ledger" => {
+            let engine = build_engine_from_options(&options)?;
+            ledger_command(&engine, &rest)?;
+        }
+        "verify-pack" => {
+            let engine = build_engine_from_options(&options)?;
+            verify_pack_command(&engine, &rest)?;
         }
         "kv-report" => {
             let engine = build_engine_from_options(&options)?;
@@ -3828,6 +3848,10 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "tokens",
         "kv-sim",
         "optimize",
+        "lock",
+        "reproduce",
+        "ledger",
+        "verify-pack",
         "kv-report",
         "prefill-report",
         "kv-budget",
@@ -13619,6 +13643,326 @@ fn optimize_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
         for b in &result.excluded {
             println!("  - {} {} ~{}t — {}", b.id, b.kind, b.tokens, b.reason);
         }
+    }
+    Ok(())
+}
+
+fn lock_path(engine: &MemoryEngine) -> PathBuf {
+    engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("context.lock")
+}
+
+fn ledger_path(engine: &MemoryEngine) -> PathBuf {
+    engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("ledger.jsonl")
+}
+
+/// Build a deterministic lockfile + provenance ledger entry for a task.
+fn build_lock_and_ledger(
+    engine: &MemoryEngine,
+    task: &str,
+    provider: &str,
+    budget: usize,
+) -> Result<(memory_core::ContextPackLock, memory_core::LedgerEntry)> {
+    let report = build_ai_context_report(engine, task, provider, budget, None)?;
+    let candidates = retrieve_candidates(engine, task)?;
+    let ir = memory_core::MemoryIr::from_retrieved(&candidates);
+    let task_class = classify_task(task);
+    let repo_state = repo_state_hash();
+
+    // Included = non-excluded blocks; excluded = excluded blocks with reasons.
+    let mut included_memories = Vec::new();
+    let mut source_hashes = Vec::new();
+    let mut excluded_memories = Vec::new();
+    for block in &ir.blocks {
+        match &block.exclusion_reason {
+            Some(reason) => excluded_memories.push(memory_core::ExcludedRecord {
+                id: block
+                    .source_memory_id
+                    .clone()
+                    .unwrap_or_else(|| block.id.clone()),
+                reason: reason.clone(),
+            }),
+            None => {
+                if let Some(id) = &block.source_memory_id {
+                    included_memories.push(id.clone());
+                }
+                source_hashes.push(block.content_hash.clone());
+            }
+        }
+    }
+
+    // Freshness proofs for the included memories.
+    let memories = engine.all_memories(None, true)?;
+    let mut proofs_passed = 0usize;
+    let mut proofs_failed = 0usize;
+    let mut proof_hashes = Vec::new();
+    for id in &included_memories {
+        if let Some(m) = memories.iter().find(|m| &m.id == id) {
+            let proof = prove_memory(m);
+            proof_hashes.push(proof.proof_hash.clone());
+            if proof.is_fresh() {
+                proofs_passed += 1;
+            } else {
+                proofs_failed += 1;
+            }
+        }
+    }
+
+    let negative_store = load_negative_store(engine);
+    let negative_version = memory_core::content_hash("negv", negative_store.to_json().as_bytes());
+    let stable_prefix_hash = memory_core::stable_prefix_hash(&report.stable_prefix);
+    let fresh_suffix_hash = memory_core::content_hash("suffix", report.fresh_suffix.as_bytes());
+    let pack_id = memory_core::pack_id(
+        &report.stable_prefix,
+        &report.fresh_suffix,
+        provider,
+        &task_class,
+    );
+    let pack_hash = memory_core::content_hash("pack", report.compiled_prompt.as_bytes());
+
+    let lock = memory_core::ContextPackLock {
+        pack_id: pack_id.clone(),
+        compiler_version: memory_core::compiler_version(),
+        repo_state_hash: repo_state.clone(),
+        task_class: task_class.clone(),
+        provider: provider.to_string(),
+        memory_ids: included_memories.clone(),
+        source_hashes,
+        freshness_proof_hashes: proof_hashes,
+        negative_memory_version: negative_version,
+        stable_prefix_hash: stable_prefix_hash.clone(),
+        fresh_suffix_hash: fresh_suffix_hash.clone(),
+        token_counts: memory_core::LockTokenCounts {
+            stable_prefix: report.cacheable_prefix_tokens,
+            fresh_suffix: report.fresh_suffix_tokens,
+            compiled: report.compiled_tokens,
+        },
+    };
+
+    let entry = memory_core::LedgerEntry {
+        pack_id,
+        recorded_at: Utc::now(),
+        provider: provider.to_string(),
+        task_class,
+        repo_state_hash: repo_state,
+        included_memories,
+        excluded_memories,
+        proofs_passed,
+        proofs_failed,
+        stable_prefix_hash,
+        fresh_suffix_hash,
+        stable_prefix_tokens: report.cacheable_prefix_tokens,
+        fresh_suffix_tokens: report.fresh_suffix_tokens,
+        compiled_tokens: report.compiled_tokens,
+        budget,
+        cache_regions: vec!["stable_repo_prefix".into(), "fresh_task_suffix".into()],
+        generated_files: vec![],
+        pack_hash,
+    };
+
+    Ok((lock, entry))
+}
+
+/// `memory lock [<task>]` writes context.lock and appends a ledger entry.
+/// `memory lock diff [<task>]` diffs the current pack against the stored lock.
+fn lock_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let is_diff = rest.first().map(|s| s.as_str()) == Some("diff");
+    let rest = if is_diff { &rest[1..] } else { rest };
+    let task = task_from_rest(rest, "current task");
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let (lock, entry) = build_lock_and_ledger(engine, &task, &provider, budget)?;
+
+    if is_diff {
+        let stored = fs::read_to_string(lock_path(engine))
+            .ok()
+            .and_then(|raw| memory_core::ContextPackLock::from_json(&raw));
+        match stored {
+            None => println!("no stored lock — run 'memory lock' first"),
+            Some(stored) => {
+                let diffs = stored.diff(&lock);
+                if diffs.is_empty() {
+                    println!("lock matches: pack is reproducible from context.lock");
+                } else {
+                    println!("lock differs ({} changes):", diffs.len());
+                    for d in diffs {
+                        println!("  {d}");
+                    }
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    let path = lock_path(engine);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, lock.to_json())?;
+    // Append the ledger entry.
+    let lpath = ledger_path(engine);
+    let mut log = fs::read_to_string(&lpath).unwrap_or_default();
+    log.push_str(&entry.to_jsonl());
+    log.push('\n');
+    fs::write(&lpath, log)?;
+
+    if cli_flag(rest, "--json") {
+        println!("{}", lock.to_json());
+    } else {
+        println!("wrote {}", path.display());
+        println!("pack_id: {}", lock.pack_id);
+        println!("stable_prefix_hash: {}", lock.stable_prefix_hash);
+        println!("lock_hash: {}", lock.lock_hash());
+        println!(
+            "memories: {}  proofs: {} pass / {} fail",
+            lock.memory_ids.len(),
+            entry.proofs_passed,
+            entry.proofs_failed
+        );
+    }
+    Ok(())
+}
+
+/// `memory reproduce [<task>]` — recompute the lock and verify it matches the
+/// stored context.lock (proving the pack is deterministically reproducible).
+fn reproduce_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let (lock, _) = build_lock_and_ledger(engine, &task, &provider, budget)?;
+    let stored = fs::read_to_string(lock_path(engine))
+        .ok()
+        .and_then(|raw| memory_core::ContextPackLock::from_json(&raw));
+    match stored {
+        None => {
+            println!("no context.lock found — run 'memory lock' first");
+            Ok(())
+        }
+        Some(stored) => {
+            // The stable prefix is task-independent, so it must always match.
+            let prefix_ok = stored.stable_prefix_hash == lock.stable_prefix_hash;
+            let full_ok = stored.matches(&lock);
+            println!("reproduce: {task}");
+            println!(
+                "stable prefix reproducible: {}",
+                if prefix_ok { "yes" } else { "no" }
+            );
+            println!(
+                "full lock reproducible: {}",
+                if full_ok { "yes" } else { "no" }
+            );
+            if !full_ok {
+                for d in stored.diff(&lock) {
+                    println!("  {d}");
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+/// `memory ledger latest|show <pack-id>|export [--json]`.
+fn ledger_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let sub = rest.first().map(|s| s.as_str()).unwrap_or("latest");
+    let entries = memory_core::LedgerEntry::parse_log(
+        &fs::read_to_string(ledger_path(engine)).unwrap_or_default(),
+    );
+    match sub {
+        "export" => {
+            let arr: Vec<Value> = entries.iter().map(|e| e.to_json()).collect();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({ "ledger": arr }))?
+            );
+        }
+        "show" => {
+            let id = rest.get(1).cloned().unwrap_or_default();
+            match entries.iter().find(|e| e.pack_id == id) {
+                Some(e) => println!("{}", serde_json::to_string_pretty(&e.to_json())?),
+                None => println!("no ledger entry with pack_id {id}"),
+            }
+        }
+        "diff" => {
+            if entries.len() < 2 {
+                println!("need at least two ledger entries to diff");
+            } else {
+                let a = &entries[entries.len() - 2];
+                let b = &entries[entries.len() - 1];
+                println!("ledger diff: {} -> {}", a.pack_id, b.pack_id);
+                println!(
+                    "compiled tokens: {} -> {}",
+                    a.compiled_tokens, b.compiled_tokens
+                );
+                let added: Vec<&String> = b
+                    .included_memories
+                    .iter()
+                    .filter(|m| !a.included_memories.contains(m))
+                    .collect();
+                let removed: Vec<&String> = a
+                    .included_memories
+                    .iter()
+                    .filter(|m| !b.included_memories.contains(m))
+                    .collect();
+                for m in added {
+                    println!("  + {m}");
+                }
+                for m in removed {
+                    println!("  - {m}");
+                }
+            }
+        }
+        _ => match entries.last() {
+            None => println!("ledger is empty — run 'memory lock' to record a pack"),
+            Some(e) => {
+                if cli_flag(rest, "--json") {
+                    println!("{}", serde_json::to_string_pretty(&e.to_json())?);
+                } else {
+                    println!("latest ledger entry");
+                    println!("pack_id: {}", e.pack_id);
+                    println!("provider: {}  task_class: {}", e.provider, e.task_class);
+                    println!(
+                        "included: {}  excluded: {}  proofs: {}/{}",
+                        e.included_memories.len(),
+                        e.excluded_memories.len(),
+                        e.proofs_passed,
+                        e.proofs_passed + e.proofs_failed
+                    );
+                    println!("compiled tokens: {}", e.compiled_tokens);
+                }
+            }
+        },
+    }
+    Ok(())
+}
+
+/// `memory verify-pack <file>` — recompute the file's content hash and, if a
+/// matching ledger entry exists, confirm the pack hash is unchanged.
+fn verify_pack_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let path = rest
+        .iter()
+        .find(|a| !a.starts_with("--"))
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("usage: memory verify-pack <pack-file>"))?;
+    let content = fs::read_to_string(&path)?;
+    let hash = memory_core::content_hash("pack", content.as_bytes());
+    let entries = memory_core::LedgerEntry::parse_log(
+        &fs::read_to_string(ledger_path(engine)).unwrap_or_default(),
+    );
+    let matching = entries.iter().find(|e| e.pack_hash == hash);
+    println!("pack file: {path}");
+    println!("pack_hash: {hash}");
+    match matching {
+        Some(e) => println!("verified: matches ledger entry {}", e.pack_id),
+        None => println!(
+            "no ledger entry matches this pack hash (file may have changed or was not locked)"
+        ),
     }
     Ok(())
 }

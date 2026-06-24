@@ -11,6 +11,8 @@ mod graph;
 mod import;
 mod ir;
 mod kv_model;
+mod ledger;
+mod lockfile;
 mod map;
 mod negative;
 mod optimizer;
@@ -48,6 +50,8 @@ pub use import::{
 };
 pub use ir::{CacheRole, IrBlock, IrKind, MemoryIr, Volatility};
 pub use kv_model::{mib, KvComparison, ModelProfile};
+pub use ledger::{ExcludedRecord, LedgerEntry, PackChecksums};
+pub use lockfile::{ContextPackLock, LockTokenCounts};
 pub use map::{
     MapCitation, MapDiff, MapEdge, MapEdgeKind, MapNode, MapNodeChange, MapNodeClass,
     MapOutputFormat, MapRequest, MapType, MemoryMap,

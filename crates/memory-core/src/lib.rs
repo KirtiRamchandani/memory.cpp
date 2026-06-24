@@ -1,4 +1,5 @@
 mod api;
+mod cache_manifest;
 mod compression;
 mod config;
 mod embedding;
@@ -8,6 +9,7 @@ mod eval;
 mod graph;
 mod import;
 mod map;
+mod prefix;
 mod ranker;
 mod storage;
 mod types;
@@ -22,6 +24,7 @@ pub use api::{
     MemoryRecordOptions, PrefillReport, RuntimePlanOptions, RuntimePlanReport, SignalDensityReport,
     TokenFirewallReport,
 };
+pub use cache_manifest::{compiler_version, CacheManifest, CacheManifestInput, CacheRegion};
 pub use compression::{CompressionConfig, Compressor, HeuristicCompressor};
 pub use config::EngineConfig;
 pub use embedding::{Embedder, FastEmbedOnnxEmbedder, HashEmbedder, SharedEmbedder};
@@ -36,6 +39,10 @@ pub use import::{
 pub use map::{
     MapCitation, MapDiff, MapEdge, MapEdgeKind, MapNode, MapNodeChange, MapNodeClass,
     MapOutputFormat, MapRequest, MapType, MemoryMap,
+};
+pub use prefix::{
+    canonicalize_stable_prefix, content_hash, pack_id, render_fresh_suffix, stable_prefix_hash,
+    FreshSuffixInput, StablePrefixInput, PACK_VERSION, STABLE_PREFIX_VERSION,
 };
 pub use ranker::{RankFeatures, Ranker, RankerConfig};
 pub use types::{

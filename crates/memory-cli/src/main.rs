@@ -2,7 +2,6 @@ use std::{
     collections::{HashMap, HashSet},
     env, fs,
     fs::{File, OpenOptions},
-    hash::{Hash, Hasher},
     io::{self, BufRead, Read, Write},
     net::TcpListener,
     path::{Path, PathBuf},
@@ -2705,6 +2704,9 @@ fn print_extended_help() -> Result<()> {
     println!("  kv-budget <task> --max-kv-tokens 4096");
     println!("  signal-density <task>           Show useful signal versus noise");
     println!("  cache-plan|cache-audit|cache-hash|cache-stability");
+    println!(
+        "  cache-manifest <task> --provider anthropic   Machine-readable cacheable-region manifest"
+    );
     println!("  runtime-plan <task> --runtime generic|llama.cpp|ollama|vllm|sglang");
     println!("  savings | roi | leaderboard     Approximate token/cost/reuse summaries");
     println!();
@@ -2880,6 +2882,10 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
         "cache-plan" => {
             let engine = build_engine_from_options(&options)?;
             cache_plan_command(&engine, &rest)?;
+        }
+        "cache-manifest" => {
+            let engine = build_engine_from_options(&options)?;
+            cache_manifest_command(&engine, &rest)?;
         }
         "kv-report" => {
             let engine = build_engine_from_options(&options)?;
@@ -3766,6 +3772,7 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "token-firewall",
         "firewall",
         "cache-plan",
+        "cache-manifest",
         "kv-report",
         "prefill-report",
         "kv-budget",
@@ -10691,16 +10698,15 @@ fn print_token_report(report: &AiContextReport) {
     );
 }
 
+/// Deterministic content hash used for cache keys, pack ids, and checksums.
+/// Uses blake3 so the value is stable across runs, machines, and Rust versions
+/// (the previous DefaultHasher value was process-stable but not portable).
 fn stable_hash(input: &str) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    input.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+    stable_hash_bytes(input.as_bytes())
 }
 
 fn stable_hash_bytes(input: &[u8]) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    input.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+    blake3::hash(input).to_hex().to_string()
 }
 
 fn collect_signable_files(root: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
@@ -12882,9 +12888,143 @@ fn cache_hash_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
         let task = task_from_rest(rest, "current task");
         build_ai_context_report(engine, &task, "generic", 1500, None)?.stable_prefix
     };
-    println!("stable_prefix_hash: {}", stable_hash(&text));
-    println!("tokens: {}", estimate_tokens(&text));
+    // Tagged blake3 hash of the stable-prefix bytes (not provider+task), so the
+    // same repo material yields the same cache key regardless of the task.
+    let tagged = memory_core::stable_prefix_hash(&text);
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "stable_prefix_hash": tagged,
+                "tokens": estimate_tokens(&text),
+            }))?
+        );
+    } else {
+        println!("stable_prefix_hash: {tagged}");
+        println!("tokens: {}", estimate_tokens(&text));
+    }
     Ok(())
+}
+
+/// Emit a machine-readable cache manifest for a compiled pack: the stable
+/// prefix hash, repo state hash, cacheable/non-cacheable token regions, and
+/// estimated repeated tokens / KV positions avoided when the prefix is reused.
+fn cache_manifest_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let provider = cli_flag_value(rest, "--provider").unwrap_or_else(|| "generic".to_string());
+    let budget = option_usize(rest, "--budget", 1500);
+    let task_class = cli_flag_value(rest, "--task-class").unwrap_or_else(|| classify_task(&task));
+    let expected_reuse = option_usize(rest, "--expected-reuse", 10);
+    let report = build_ai_context_report(engine, &task, &provider, budget, None)?;
+
+    let cache_breaker_warnings = stable_prefix_cache_breakers(&report.stable_prefix);
+    let manifest = memory_core::CacheManifest::build(memory_core::CacheManifestInput {
+        stable_prefix: &report.stable_prefix,
+        fresh_suffix: &report.fresh_suffix,
+        provider: &provider,
+        task_class: &task_class,
+        repo_state_hash: &repo_state_hash(),
+        stable_prefix_tokens: report.cacheable_prefix_tokens,
+        fresh_suffix_tokens: report.fresh_suffix_tokens,
+        expected_reuse,
+        cache_breaker_warnings,
+    });
+
+    if cli_flag(rest, "--json") || cli_flag(rest, "--for-paper") {
+        println!("{}", serde_json::to_string_pretty(&manifest.to_json())?);
+    } else {
+        println!("cache manifest");
+        println!("pack_id: {}", manifest.pack_id);
+        println!("stable_prefix_hash: {}", manifest.stable_prefix_hash);
+        println!("repo_state_hash: {}", manifest.repo_state_hash);
+        println!("task_class: {}", manifest.task_class);
+        println!("provider: {}", manifest.provider);
+        println!(
+            "stable_prefix_tokens: {}  fresh_suffix_tokens: {}",
+            manifest.stable_prefix_token_count, manifest.fresh_suffix_token_count
+        );
+        for region in &manifest.cache_regions {
+            println!(
+                "- region {} [{}..{}] cacheable={}{}",
+                region.name,
+                region.start_token,
+                region.end_token,
+                region.cacheable,
+                region
+                    .ttl_hint
+                    .as_ref()
+                    .map(|t| format!(" ttl={t}"))
+                    .unwrap_or_default()
+            );
+        }
+        if !manifest.cache_breaker_warnings.is_empty() {
+            println!("cache-breaker warnings:");
+            for warning in &manifest.cache_breaker_warnings {
+                println!("  - {warning}");
+            }
+        }
+        println!("strategy: {}", manifest.suggested_provider_strategy);
+        println!(
+            "estimated repeated tokens avoided: {} (over {} reuses)",
+            manifest.estimated_repeated_tokens_avoided, expected_reuse
+        );
+        println!(
+            "estimated KV positions avoided: {}",
+            manifest.estimated_kv_positions_avoided
+        );
+    }
+    Ok(())
+}
+
+/// Coarse task classifier used for cache-manifest task_class labelling.
+fn classify_task(task: &str) -> String {
+    let lower = task.to_ascii_lowercase();
+    if lower.contains("fix") || lower.contains("bug") || lower.contains("error") {
+        "bugfix".to_string()
+    } else if lower.contains("refactor") || lower.contains("clean") {
+        "refactor".to_string()
+    } else if lower.contains("test") {
+        "testing".to_string()
+    } else if lower.contains("review") || lower.contains("audit") {
+        "review".to_string()
+    } else if lower.contains("add") || lower.contains("implement") || lower.contains("feature") {
+        "feature".to_string()
+    } else {
+        "general".to_string()
+    }
+}
+
+/// Best-effort repository state hash from git HEAD; falls back to a stable
+/// placeholder when git is unavailable so output stays deterministic.
+fn repo_state_hash() -> String {
+    match ProcessCommand::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if sha.is_empty() {
+                "git:unknown".to_string()
+            } else {
+                format!("git:{sha}")
+            }
+        }
+        _ => "git:unknown".to_string(),
+    }
+}
+
+/// Detect content in a stable prefix that would break prompt caching.
+fn stable_prefix_cache_breakers(prefix: &str) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let lower = prefix.to_ascii_lowercase();
+    for needle in ["task:", "current error", "tool output", "traceback"] {
+        if lower.contains(needle) {
+            warnings.push(format!(
+                "stable prefix contains volatile marker '{needle}' — move it to the fresh suffix"
+            ));
+        }
+    }
+    warnings
 }
 
 fn cache_stability_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
@@ -18502,7 +18642,7 @@ fn handle_mcp_message(engine: &MemoryEngine, request: Value, config: &McpRuntime
                     return json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32002, "message": err.to_string() } })
                 }
             }
-        },
+        }
         "tools/list" => json!({ "tools": mcp_tools(config) }),
         "tools/call" => {
             let params = request.get("params").cloned().unwrap_or(Value::Null);
@@ -18698,14 +18838,20 @@ fn mcp_resources() -> Vec<Value> {
         json!({ "uri": "memory://rules", "name": "Mistake firewall rules", "mimeType": "text/plain" }),
         json!({ "uri": "memory://mistakes", "name": "Recent mistakes", "mimeType": "text/plain" }),
         json!({ "uri": "memory://profile", "name": "Local profile memory", "mimeType": "text/plain" }),
-        json!({ "uri": "memory://project-state", "name": "Project state summary", "mimeType": "text/plain" })
+        json!({ "uri": "memory://project-state", "name": "Project state summary", "mimeType": "text/plain" }),
     ]
 }
 
 fn read_mcp_resource(engine: &MemoryEngine, uri: &str) -> Result<String> {
     match uri {
         "memory://status" => {
-            let count = engine.search(RecallQuery::new("memory").limit(1000).include_content(false))?.len();
+            let count = engine
+                .search(
+                    RecallQuery::new("memory")
+                        .limit(1000)
+                        .include_content(false),
+                )?
+                .len();
             Ok(format!(
                 "memory.cpp local vault\nstore: {}\nmemories: {count}",
                 engine.store_path().display()
@@ -18725,7 +18871,15 @@ fn read_mcp_resource(engine: &MemoryEngine, uri: &str) -> Result<String> {
             }))?)
         }
         "memory://rules" | "memory://mistakes" => {
-            let items = engine.search(RecallQuery::new(if uri.ends_with("mistakes") { "mistake" } else { "rule" }).limit(20).include_content(true))?;
+            let items = engine.search(
+                RecallQuery::new(if uri.ends_with("mistakes") {
+                    "mistake"
+                } else {
+                    "rule"
+                })
+                .limit(20)
+                .include_content(true),
+            )?;
             Ok(items
                 .into_iter()
                 .map(|item| item.memory.content.clone())
@@ -18733,7 +18887,11 @@ fn read_mcp_resource(engine: &MemoryEngine, uri: &str) -> Result<String> {
                 .join("\n---\n"))
         }
         "memory://profile" | "memory://project-state" => {
-            let items = engine.search(RecallQuery::new("project state profile").limit(15).include_content(true))?;
+            let items = engine.search(
+                RecallQuery::new("project state profile")
+                    .limit(15)
+                    .include_content(true),
+            )?;
             Ok(items
                 .into_iter()
                 .map(|item| format!("[{}] {}", item.memory.id, item.memory.content))

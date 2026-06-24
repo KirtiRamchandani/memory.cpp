@@ -186,10 +186,10 @@ fn compact_context(options: &ContextControlOptions) -> (String, Vec<String>) {
 
 fn build_report(options: ContextControlOptions) -> ContextControlReport {
     let (memory_pack, omitted) = compact_context(&options);
-    let stable_prefix = format!(
-        "memory.cpp stable prefix\nProvider: {}\nTask: {}\nRules:\n- Local-first.\n- Do not include secrets.\n- Prefer durable memories over raw logs.",
-        options.provider, options.task
-    );
+    // The stable prefix must be byte-for-byte reproducible across tasks, so it
+    // deliberately excludes the task text and the provider name. Both of those
+    // are volatile and belong in the fresh suffix / pack id instead.
+    let stable_prefix = canonical_stable_prefix();
     let fresh_suffix = format!("Fresh task request:\n{}", options.task);
     let context_pack = if memory_pack.is_empty() {
         "No local context supplied.".to_string()
@@ -291,14 +291,22 @@ pub fn calculateSignalDensity(options: ContextControlOptions) -> SignalDensityRe
     build_report(options).signal_density
 }
 
+/// The deterministic stable prefix used by the v1 API surface. It depends only
+/// on durable, low-volatility rules — never on the provider or task — so the
+/// hash is byte-for-byte stable across requests.
+fn canonical_stable_prefix() -> String {
+    "memory.cpp stable prefix\nRules:\n- Local-first.\n- Do not include secrets.\n- Prefer durable memories over raw logs.".to_string()
+}
+
 pub fn planProviderCache(options: ContextControlOptions) -> CacheAuditReport {
-    let prefix = format!("{}:{}", options.provider, options.task);
+    // Hash the stable-prefix bytes, not "provider:task". This is what makes the
+    // cache key reusable across different tasks against the same repo material.
     CacheAuditReport {
         provider: options.provider,
         cache_hit_risk: "low when stable prefix is byte-for-byte reused".to_string(),
         problems: Vec::new(),
         fixes: vec!["put dynamic text after stable memory blocks".to_string()],
-        stable_prefix_hash: format!("{:016x}", stable_hash(prefix.as_bytes())),
+        stable_prefix_hash: crate::prefix::stable_prefix_hash(&canonical_stable_prefix()),
     }
 }
 
@@ -391,16 +399,45 @@ pub fn scoreAgentReadiness(options: ContextControlOptions) -> ContextControlRepo
     build_report(options)
 }
 
-fn stable_hash(bytes: &[u8]) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    hasher.finish()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stable_prefix_hash_is_task_independent() {
+        let base = ContextControlOptions {
+            task: "fix billing export".to_string(),
+            provider: "anthropic".to_string(),
+            budget: 1500,
+            context: vec![],
+        };
+        let other = ContextControlOptions {
+            task: "a completely different request".to_string(),
+            ..base.clone()
+        };
+        assert_eq!(
+            planProviderCache(base).stable_prefix_hash,
+            planProviderCache(other).stable_prefix_hash,
+        );
+    }
+
+    #[test]
+    fn stable_prefix_excludes_task_text() {
+        let report = compileContext(ContextControlOptions {
+            task: "fix the flux capacitor".to_string(),
+            provider: "generic".to_string(),
+            budget: 1500,
+            context: vec![],
+        });
+        assert!(!report
+            .stable_prefix
+            .to_lowercase()
+            .contains("flux capacitor"));
+        assert!(report
+            .fresh_suffix
+            .to_lowercase()
+            .contains("flux capacitor"));
+    }
 
     #[test]
     fn api_reduces_duplicate_context() {

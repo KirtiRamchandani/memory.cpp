@@ -807,6 +807,7 @@ name = "memory-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake3",
  "chrono",
  "clap",
  "memory-core",

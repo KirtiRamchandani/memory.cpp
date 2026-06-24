@@ -6,10 +6,12 @@ mod embedding;
 mod engine;
 mod error;
 mod eval;
+mod freshness;
 mod graph;
 mod import;
 mod ir;
 mod map;
+mod negative;
 mod prefix;
 mod ranker;
 mod storage;
@@ -32,6 +34,10 @@ pub use embedding::{Embedder, FastEmbedOnnxEmbedder, HashEmbedder, SharedEmbedde
 pub use engine::MemoryEngine;
 pub use error::{MemoryError, Result};
 pub use eval::{evaluate, EvalCase, EvalReport, EvalResult};
+pub use freshness::{
+    prove as prove_freshness, FreshnessInput, FreshnessProof, FreshnessVerdict, ProofCheck,
+    ProofStatus,
+};
 pub use graph::{extract_entities, Entity, EntityGraph, EntityKind, EntityLink};
 pub use import::{
     check_ignored_path, collect_importable_files, import_path, parse_file, ImportFormat,
@@ -42,6 +48,7 @@ pub use map::{
     MapCitation, MapDiff, MapEdge, MapEdgeKind, MapNode, MapNodeChange, MapNodeClass,
     MapOutputFormat, MapRequest, MapType, MemoryMap,
 };
+pub use negative::{NegativeKind, NegativeMemory, NegativeMemoryStore};
 pub use prefix::{
     canonicalize_stable_prefix, content_hash, pack_id, render_fresh_suffix, stable_prefix_hash,
     FreshSuffixInput, StablePrefixInput, PACK_VERSION, STABLE_PREFIX_VERSION,

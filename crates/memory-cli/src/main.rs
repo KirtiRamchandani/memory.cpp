@@ -17,10 +17,11 @@ use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
 use memory_core::{
     check_ignored_path, collect_importable_files, evaluate, import_path, parse_file, Embedder,
-    EvalCase, FastEmbedOnnxEmbedder, HashEmbedder, ImportFormat, ImportOptions, MapOutputFormat,
-    MapRequest, MapType, MemoryEdit, MemoryEngine, MemoryKind, MemoryLayer, MemoryPermission,
-    MemorySource, MemoryStatus, NewMemory, OllamaEmbedder, OpenAiCompatibleEmbedder,
-    PersonaProfile, PolicyMode, RecallQuery, SharedEmbedder, DEFAULT_MEMORYIGNORE,
+    EvalCase, FastEmbedOnnxEmbedder, FreshnessProof, HashEmbedder, ImportFormat, ImportOptions,
+    MapOutputFormat, MapRequest, MapType, MemoryEdit, MemoryEngine, MemoryKind, MemoryLayer,
+    MemoryPermission, MemorySource, MemoryStatus, NewMemory, OllamaEmbedder,
+    OpenAiCompatibleEmbedder, PersonaProfile, PolicyMode, RecallQuery, SharedEmbedder,
+    DEFAULT_MEMORYIGNORE,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -2708,6 +2709,12 @@ fn print_extended_help() -> Result<()> {
         "  cache-manifest <task> --provider anthropic   Machine-readable cacheable-region manifest"
     );
     println!("  ir inspect <task>               Lower retrieved memory into typed MemoryIR blocks");
+    println!(
+        "  negative add|list|explain       Memory of what NOT to send (stale/wrong/duplicate)"
+    );
+    println!("  prove [--memory <id>]           Freshness-prove memories against current sources");
+    println!("  audit-stale                     List memories that fail their freshness proof");
+    println!("  explain-exclusions <task>       Why context was excluded (stale/secret/negative)");
     println!("  runtime-plan <task> --runtime generic|llama.cpp|ollama|vllm|sglang");
     println!("  savings | roi | leaderboard     Approximate token/cost/reuse summaries");
     println!();
@@ -2891,6 +2898,22 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
         "ir" => {
             let engine = build_engine_from_options(&options)?;
             ir_command(&engine, &rest)?;
+        }
+        "negative" => {
+            let engine = build_engine_from_options(&options)?;
+            negative_command(&engine, &rest)?;
+        }
+        "prove" => {
+            let engine = build_engine_from_options(&options)?;
+            prove_command(&engine, &rest)?;
+        }
+        "audit-stale" => {
+            let engine = build_engine_from_options(&options)?;
+            audit_stale_command(&engine, &rest)?;
+        }
+        "explain-exclusions" => {
+            let engine = build_engine_from_options(&options)?;
+            explain_exclusions_command(&engine, &rest)?;
         }
         "kv-report" => {
             let engine = build_engine_from_options(&options)?;
@@ -3779,6 +3802,10 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "cache-plan",
         "cache-manifest",
         "ir",
+        "negative",
+        "prove",
+        "audit-stale",
+        "explain-exclusions",
         "kv-report",
         "prefill-report",
         "kv-budget",
@@ -13048,6 +13075,367 @@ fn ir_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
             block.trust_score,
             mark,
         );
+    }
+    Ok(())
+}
+
+/// Path to the persisted negative-memory store (.memory.cpp/negative.json).
+fn negative_store_path(engine: &MemoryEngine) -> PathBuf {
+    engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("negative.json")
+}
+
+fn load_negative_store(engine: &MemoryEngine) -> memory_core::NegativeMemoryStore {
+    let path = negative_store_path(engine);
+    fs::read_to_string(path)
+        .ok()
+        .map(|raw| memory_core::NegativeMemoryStore::from_json(&raw))
+        .unwrap_or_default()
+}
+
+fn save_negative_store(
+    engine: &MemoryEngine,
+    store: &memory_core::NegativeMemoryStore,
+) -> Result<()> {
+    let path = negative_store_path(engine);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, store.to_json())?;
+    Ok(())
+}
+
+/// `memory negative <add|list|remove|explain|learn>`.
+fn negative_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let sub = rest.first().map(|s| s.as_str()).unwrap_or("list");
+    let args = &rest[rest.len().min(1)..];
+    match sub {
+        "add" => {
+            let target = args
+                .iter()
+                .find(|a| !a.starts_with("--"))
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("usage: memory negative add <path-or-memory-id> --reason \"...\" [--kind stale_doc]"))?;
+            let reason =
+                cli_flag_value(args, "--reason").unwrap_or_else(|| "superseded".to_string());
+            let kind = cli_flag_value(args, "--kind")
+                .and_then(|k| memory_core::NegativeKind::parse(&k))
+                .unwrap_or(memory_core::NegativeKind::StaleDoc);
+            let mut store = load_negative_store(engine);
+            let entry = memory_core::NegativeMemory::new(&target, kind, &reason, Utc::now());
+            let id = entry.id.clone();
+            store.add(entry);
+            save_negative_store(engine, &store)?;
+            println!("added negative memory {id}: {} [{}]", target, kind.as_str());
+        }
+        "remove" => {
+            let id = args
+                .iter()
+                .find(|a| !a.starts_with("--"))
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("usage: memory negative remove <id>"))?;
+            let mut store = load_negative_store(engine);
+            if store.remove(&id) {
+                save_negative_store(engine, &store)?;
+                println!("removed {id}");
+            } else {
+                println!("no negative memory with id {id}");
+            }
+        }
+        "explain" => {
+            let task = task_from_rest(args, "current task");
+            let store = load_negative_store(engine);
+            let candidates = retrieve_candidates(engine, &task)?;
+            let mut hits = Vec::new();
+            for c in &candidates {
+                let path = c
+                    .memory
+                    .attributes
+                    .source
+                    .as_ref()
+                    .and_then(|s| s.source_file.clone());
+                if let Some(entry) = store.matching(path.as_deref(), Some(c.memory.id.as_str())) {
+                    hits.push(json!({
+                        "memory": c.memory.id,
+                        "summary": c.memory.summary,
+                        "excluded_by": entry.id,
+                        "kind": entry.kind.as_str(),
+                        "reason": entry.reason,
+                    }));
+                }
+            }
+            if cli_flag(args, "--json") {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"excluded": hits}))?
+                );
+            } else {
+                println!("negative-memory exclusions for: {task}");
+                if hits.is_empty() {
+                    println!("- none of the retrieved memories match negative memory");
+                }
+                for h in &hits {
+                    println!(
+                        "- {} excluded by {} [{}]: {}",
+                        h["memory"].as_str().unwrap_or(""),
+                        h["excluded_by"].as_str().unwrap_or(""),
+                        h["kind"].as_str().unwrap_or(""),
+                        h["reason"].as_str().unwrap_or("")
+                    );
+                }
+            }
+        }
+        "learn" => {
+            let path = cli_flag_path(args, "--from").ok_or_else(|| {
+                anyhow::anyhow!("usage: memory negative learn --from failed-run.json")
+            })?;
+            let raw = fs::read_to_string(&path)?;
+            let value: Value = serde_json::from_str(&raw)?;
+            let mut store = load_negative_store(engine);
+            let mut learned = 0usize;
+            // Learn from a failed run: any files the run flagged as misleading,
+            // stale, or generated become negative memory.
+            for key in ["misleading_files", "stale_files", "generated_files"] {
+                let kind = match key {
+                    "misleading_files" => memory_core::NegativeKind::MisleadingTrace,
+                    "stale_files" => memory_core::NegativeKind::StaleDoc,
+                    _ => memory_core::NegativeKind::GeneratedFile,
+                };
+                if let Some(arr) = value[key].as_array() {
+                    for item in arr {
+                        if let Some(target) = item.as_str() {
+                            store.add(memory_core::NegativeMemory::new(
+                                target,
+                                kind,
+                                &format!("learned from {}", path.display()),
+                                Utc::now(),
+                            ));
+                            learned += 1;
+                        }
+                    }
+                }
+            }
+            save_negative_store(engine, &store)?;
+            println!(
+                "learned {learned} negative memories from {}",
+                path.display()
+            );
+        }
+        _ => {
+            let store = load_negative_store(engine);
+            if cli_flag(args, "--json") {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &json!({"entries": store.entries.iter().map(|e| json!({
+                        "id": e.id, "target": e.target, "kind": e.kind.as_str(), "reason": e.reason,
+                    })).collect::<Vec<_>>()})
+                    )?
+                );
+            } else {
+                println!("negative memory ({} entries)", store.entries.len());
+                for e in &store.entries {
+                    println!(
+                        "- {} {} [{}]: {}",
+                        e.id,
+                        e.target,
+                        e.kind.as_str(),
+                        e.reason
+                    );
+                }
+                if store.entries.is_empty() {
+                    println!(
+                        "  (none yet — try: memory negative add docs/old.md --reason superseded)"
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Build a freshness proof for one stored memory.
+fn prove_memory(memory: &memory_core::StoredMemory) -> FreshnessProof {
+    let repo_root = resolve_repo_root(&env::current_dir().unwrap_or_default())
+        .unwrap_or_else(|| env::current_dir().unwrap_or_default());
+    let source = memory.attributes.source.as_ref();
+    let resolved_path = source
+        .and_then(|s| s.source_file.clone())
+        .map(|f| repo_root.join(f));
+    let commit = source.and_then(|s| s.source_commit.clone());
+    let commit_reachable = commit.as_ref().map(|c| {
+        ProcessCommand::new("git")
+            .args(["cat-file", "-e", &format!("{c}^{{commit}}")])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    });
+    let reliability = source
+        .and_then(|s| s.reliability)
+        .unwrap_or(memory.derived.source_reliability);
+    memory_core::prove_freshness(
+        &memory_core::FreshnessInput {
+            memory_id: &memory.id,
+            source_file: resolved_path.as_deref(),
+            source_line: memory
+                .attributes
+                .source
+                .as_ref()
+                .and_then(|s| s.source_line),
+            source_commit: commit.as_deref(),
+            stored_span_hash: None,
+            expires_at: memory.attributes.expires_at,
+            human_confirmed: memory.attributes.human_confirmed,
+            reliability,
+            newer_contradiction: memory.attributes.contradiction_count > 0,
+            commit_reachable,
+        },
+        Utc::now(),
+    )
+}
+
+/// `memory prove [--memory <id>] [--json]`.
+fn prove_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let memories = engine.all_memories(None, true)?;
+    let selected: Vec<&memory_core::StoredMemory> = match cli_flag_value(rest, "--memory") {
+        Some(id) => memories.iter().filter(|m| m.id == id).collect(),
+        None => memories
+            .iter()
+            .take(option_usize(rest, "--limit", 50))
+            .collect(),
+    };
+    let proofs: Vec<FreshnessProof> = selected.iter().map(|m| prove_memory(m)).collect();
+    if cli_flag(rest, "--json") {
+        let arr: Vec<Value> = proofs.iter().map(|p| p.to_json()).collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({ "proofs": arr }))?
+        );
+        return Ok(());
+    }
+    let fresh = proofs.iter().filter(|p| p.is_fresh()).count();
+    println!("freshness proofs: {} memories", proofs.len());
+    println!(
+        "fresh: {fresh}  stale: {}  unverifiable: {}",
+        proofs
+            .iter()
+            .filter(|p| p.verdict == memory_core::FreshnessVerdict::Stale)
+            .count(),
+        proofs
+            .iter()
+            .filter(|p| p.verdict == memory_core::FreshnessVerdict::Unverifiable)
+            .count(),
+    );
+    for p in &proofs {
+        println!(
+            "- {} {} (score {:.2})",
+            p.memory_id,
+            p.verdict.as_str(),
+            p.score
+        );
+        if p.verdict != memory_core::FreshnessVerdict::Fresh {
+            for c in p
+                .checks
+                .iter()
+                .filter(|c| c.status == memory_core::ProofStatus::Fail)
+            {
+                println!("    fail: {} — {}", c.name, c.detail);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `memory audit-stale` — list memories that fail their freshness proof.
+fn audit_stale_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let memories = engine.all_memories(None, true)?;
+    let stale: Vec<(String, FreshnessProof)> = memories
+        .iter()
+        .map(|m| (m.summary.clone(), prove_memory(m)))
+        .filter(|(_, p)| p.verdict == memory_core::FreshnessVerdict::Stale)
+        .collect();
+    if cli_flag(rest, "--json") {
+        let arr: Vec<Value> = stale
+            .iter()
+            .map(|(summary, p)| json!({ "summary": summary, "proof": p.to_json() }))
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({ "stale": arr }))?
+        );
+        return Ok(());
+    }
+    println!("stale memory audit: {} flagged", stale.len());
+    for (summary, p) in &stale {
+        let reasons: Vec<&str> = p
+            .checks
+            .iter()
+            .filter(|c| c.status == memory_core::ProofStatus::Fail)
+            .map(|c| c.name.as_str())
+            .collect();
+        println!("- {} [{}]: {}", p.memory_id, summary, reasons.join(", "));
+    }
+    if stale.is_empty() {
+        println!("  no stale memories detected");
+    }
+    Ok(())
+}
+
+/// `memory explain-exclusions [<task>]` — show why context was excluded:
+/// negative memory, staleness, secrets, prompt injection, and duplicates.
+fn explain_exclusions_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let store = load_negative_store(engine);
+    let candidates = retrieve_candidates(engine, &task)?;
+    let mut excluded = Vec::new();
+    for c in &candidates {
+        let text = memory_text(&c.memory);
+        let path = c
+            .memory
+            .attributes
+            .source
+            .as_ref()
+            .and_then(|s| s.source_file.clone());
+        let reason = if detect_sensitive_reason(&text).is_some() {
+            Some("secret-like content".to_string())
+        } else if has_prompt_injection_warning(&text) {
+            Some("prompt-injection-like content".to_string())
+        } else if is_memory_stale_or_blocked(&c.memory) {
+            Some("stale/superseded".to_string())
+        } else {
+            store
+                .matching(path.as_deref(), Some(c.memory.id.as_str()))
+                .map(|e| format!("negative memory [{}]: {}", e.kind.as_str(), e.reason))
+        };
+        if let Some(reason) = reason {
+            excluded.push(json!({
+                "memory": c.memory.id,
+                "summary": c.memory.summary,
+                "reason": reason,
+            }));
+        }
+    }
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({ "excluded": excluded }))?
+        );
+    } else {
+        println!("excluded context for: {task} ({} blocks)", excluded.len());
+        for e in &excluded {
+            println!(
+                "- {} [{}]: {}",
+                e["memory"].as_str().unwrap_or(""),
+                e["summary"].as_str().unwrap_or(""),
+                e["reason"].as_str().unwrap_or("")
+            );
+        }
+        if excluded.is_empty() {
+            println!("  no exclusions — all retrieved memory is clean and fresh");
+        }
     }
     Ok(())
 }

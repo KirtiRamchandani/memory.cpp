@@ -15408,6 +15408,13 @@ fn wow_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
         .join("wow");
     fs::create_dir_all(&base)?;
 
+    // Acquisition-grade one-command report: combine the whole compiler story
+    // (tokens, cacheable prefix, estimated KV, blocked context, debt, CAMC-Bench,
+    // write-firewall accuracy) into one artifact.
+    if cli_flag(rest, "--report") || cli_flag(rest, "--for-acquirer") {
+        return wow_acquirer_report(engine, &task, &base, json_output);
+    }
+
     let report = build_ai_context_report(engine, &task, "codex", 1500, None)?;
     let pack_path = base.join("codex-pack.md");
     let doctor_path = base.join("doctor.json");
@@ -15500,6 +15507,149 @@ fn wow_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
             result["task"].as_str().unwrap_or("")
         );
     }
+    Ok(())
+}
+
+/// Build the acquisition-grade wow report combining every compiler signal.
+fn wow_acquirer_report(
+    engine: &MemoryEngine,
+    task: &str,
+    base: &Path,
+    json_output: bool,
+) -> Result<()> {
+    let report = build_ai_context_report(engine, task, "anthropic", 1500, None)?;
+    let candidates = retrieve_candidates(engine, task)?;
+    let ir = memory_core::MemoryIr::from_retrieved(&candidates);
+
+    // Context debt from the live vault.
+    let memories = engine.all_memories(None, true)?;
+    let stale = memories
+        .iter()
+        .filter(|m| {
+            matches!(
+                m.attributes.status,
+                MemoryStatus::Superseded | MemoryStatus::Contradicted | MemoryStatus::Archived
+            )
+        })
+        .count();
+    let debt = memory_core::debt_score(memory_core::DebtFactors {
+        stale_memories: stale,
+        unresolved_contradictions: memories
+            .iter()
+            .filter(|m| m.attributes.contradiction_count > 0)
+            .count(),
+        secret_risk_memories: memories
+            .iter()
+            .filter(|m| m.derived.sensitivity > 0.6)
+            .count(),
+        total_memories: memories.len(),
+        ..Default::default()
+    });
+
+    let bench = memory_core::run_camc_bench("llama-3.1-8b", 1500);
+    let full_camc = bench
+        .results
+        .iter()
+        .find(|r| r.strategy == "full CAMC")
+        .cloned();
+    let poison = memory_core::poison_benchmark();
+    let poison_correct = poison.iter().filter(|o| o.correct).count();
+
+    let kv_profile = memory_core::ModelProfile::preset("llama-3.1-8b").unwrap();
+    let kv = memory_core::KvComparison::new(
+        &kv_profile,
+        report.raw_tokens,
+        report.compiled_tokens,
+        report.cacheable_prefix_tokens,
+        report.fresh_suffix_tokens,
+    );
+
+    let value = json!({
+        "product": "memory.cpp",
+        "thesis": "Local-first pre-inference context compiler for coding agents.",
+        "task": task,
+        "compiled": {
+            "raw_tokens": report.raw_tokens,
+            "compiled_tokens": report.compiled_tokens,
+            "reduction_percent": format!("{:.1}", report.reduction_percent()),
+            "cacheable_prefix_tokens": report.cacheable_prefix_tokens,
+            "fresh_suffix_tokens": report.fresh_suffix_tokens,
+            "stable_prefix_hash": memory_core::stable_prefix_hash(&report.stable_prefix),
+        },
+        "blocked": {
+            "duplicate_tokens": report.duplicate_blocked_tokens,
+            "stale_tokens": report.stale_blocked_tokens,
+            "secret_like_strings": report.secret_like_blocks,
+            "prompt_injection_warnings": report.prompt_injection_warnings,
+        },
+        "ir": {
+            "blocks": ir.blocks.len(),
+            "stable": ir.stable_blocks().count(),
+            "fresh": ir.fresh_blocks().count(),
+            "excluded": ir.excluded_blocks().count(),
+        },
+        "kv_estimate": kv.to_json(),
+        "context_debt": { "score": debt.score, "grade": debt.grade },
+        "camc_bench_full_camc": full_camc.as_ref().map(|r| r.to_json()),
+        "write_firewall_accuracy": format!("{poison_correct}/{}", poison.len()),
+        "honesty": "Estimates are prompt-side. memory.cpp reduces KV pressure by sending fewer tokens; it does not compress a provider's KV cache. Runtime latency must be measured separately.",
+        "local_only": true,
+    });
+
+    let report_path = base.join("acquirer-report.json");
+    write_public_artifact(&report_path, &serde_json::to_string_pretty(&value)?, true)?;
+
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
+    }
+    println!("memory.cpp — acquisition report");
+    println!("thesis: local-first pre-inference context compiler for coding agents\n");
+    println!("Task: {task}");
+    println!(
+        "Raw context: {} tokens  ->  compiled: {} tokens  ({:.1}% reduction)",
+        report.raw_tokens,
+        report.compiled_tokens,
+        report.reduction_percent()
+    );
+    println!(
+        "Cacheable stable prefix: {} tokens  |  fresh suffix: {} tokens",
+        report.cacheable_prefix_tokens, report.fresh_suffix_tokens
+    );
+    println!(
+        "Stable prefix hash: {}",
+        memory_core::stable_prefix_hash(&report.stable_prefix)
+    );
+    println!(
+        "Blocked: {} duplicate, {} stale tokens, {} secret-like, {} injection warnings",
+        report.duplicate_blocked_tokens,
+        report.stale_blocked_tokens,
+        report.secret_like_blocks,
+        report.prompt_injection_warnings
+    );
+    println!(
+        "Estimated KV avoided (llama-3.1-8b): {:.1} MiB ({:.1}%)",
+        memory_core::mib(kv.estimated_kv_bytes_avoided),
+        kv.estimated_kv_percent_reduction
+    );
+    println!("Context debt: {}/100 ({})", debt.score, debt.grade);
+    if let Some(r) = &full_camc {
+        println!(
+            "CAMC-Bench full CAMC: {} tokens, {:.1}% vs raw, {} stale, {} secrets, {}/{} tasks",
+            r.total_tokens,
+            r.token_reduction_vs_raw_percent,
+            r.stale_included,
+            r.secret_leakage,
+            r.tasks_passed,
+            r.tasks_total
+        );
+    }
+    println!(
+        "Write-firewall detection: {poison_correct}/{} scenarios",
+        poison.len()
+    );
+    println!("\nEstimates are prompt-side; runtime KV/latency measured separately.");
+    println!("report: {}", report_path.display());
     Ok(())
 }
 

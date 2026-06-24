@@ -2,136 +2,202 @@
 
 # memory.cpp
 
-**Your repo remembers. AI tools get less noise.**
+### Cache-aware repo memory for coding agents.
 
-Local-first context compiler · SQLite vault · Token firewall · MCP bridge
+**Remember more. Send less. Cache smarter.**
+
+`memory.cpp` is a **local-first, pre-inference context compiler**. It turns repository
+history — decisions, fixes, traces, tests, rules, and prior agent work — into
+**freshness-proven, security-filtered, cache-stable context packs** before the model
+ever sees the request. Fewer tokens, a larger reusable prefix, stale and harmful
+context blocked, and a reproducible record of exactly what was sent.
 
 [![CI](https://github.com/KirtiRamchandani/memory.cpp/actions/workflows/ci.yml/badge.svg)](https://github.com/KirtiRamchandani/memory.cpp/actions/workflows/ci.yml)
 [![Release](https://github.com/KirtiRamchandani/memory.cpp/actions/workflows/release.yml/badge.svg)](https://github.com/KirtiRamchandani/memory.cpp/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Local-first](https://img.shields.io/badge/local--first-no%20cloud-2e9e5b.svg)](#privacy--safety)
 
-[Quick start](docs/quickstart.md) · [Install](docs/install.md) · [CLI](docs/cli.md) · [Website](website/index.html) · [Examples](examples/)
+[Quick start](#60-second-quickstart) · [Why](#the-problem) · [Compiler](#the-compiler) · [Benchmark](#camc-bench) · [CLI](docs/cli.md) · [Paper](docs/paper/) · [Positioning](docs/competitive-positioning.md)
 
 </div>
 
 ---
 
-> **Remember more. Send less. Run faster.**
+> **The cheapest token is the one the model never has to process.**
 
-Stop paying models to reread the same repo context. `memory.cpp` compiles decisions, fixes, rules, and traces into **small verified packs** — with secrets blocked, stale memory excluded, and everything inspectable on disk.
+Coding agents are long-horizon: they rebuild tool traces, file summaries, test
+output, and repeated intent across many turns. A large prompt can be technically
+valid yet still be **wasteful, stale, unsafe, and impossible to cache**. That waste
+shows up as repeated prefill work, larger attention state, lower prompt-cache reuse,
+more memory pressure per request, and — worst of all — wrong patches when old docs
+and prior failed attempts leak into context.
 
-<p align="center">
-  <img src="assets/memorycpp-demo.svg" alt="memory.cpp terminal demo" width="720" />
-</p>
+`memory.cpp` treats this as a **compiler problem, not a retrieval problem**. It decides
+what belongs in the stable prefix, what belongs in the fresh suffix, what must be
+excluded, and what should only be available by rehydration handle.
 
 ```text
 Raw context available     84,000 tokens
 Compiled context           1,420 tokens
-Estimated waste blocked     82,580 token positions
-Signal density               8.4×
+Cacheable stable prefix    1,100 tokens   (byte-stable, blake3-hashed)
+Stale / secret blocked     ✓ stale  ✓ contradictions  ✓ secrets
+Estimated KV avoided       prompt-side — see honesty note below
 ```
+
+> **Honesty note.** memory.cpp does **not** compress a provider's KV cache. It reduces
+> KV *pressure* by keeping unnecessary, stale, duplicated, or harmful tokens out of the
+> prompt in the first place. All KV/latency figures are **estimates** unless measured
+> against a runtime, and are reported separately from measured numbers.
 
 ---
 
-## Install & run
+## 60-second quickstart
 
 ```bash
-./scripts/install.sh          # or: ./scripts/install.ps1
-memory setup --developer --yes
-memory wow
+# build
+cargo build -p memory-cli
+
+# teach it a couple of durable facts
+memory remember "Billing exports must be deterministic" --tags invariant
+memory remember "ADR-004: use server-side sessions, not JWT"
+
+# compile a cache-stable pack and inspect everything
+memory compile "fix the billing export bug" --provider anthropic --budget 1500
+memory cache-manifest "fix the billing export bug" --provider anthropic
+memory ir inspect "fix the billing export bug"        # typed MemoryIR blocks
+memory lock "fix the billing export bug"              # reproducible lockfile + ledger
+memory wow --for-acquirer                             # the whole story in one report
 ```
 
-From source: `cargo build -p memory-cli && cargo run -p memory-cli -- wow`
+Install scripts: `./scripts/install.sh` · `./scripts/install.ps1` ·
+`cargo install --path crates/memory-cli`
 
 ---
 
-## What it does
+## The problem
 
-| Layer | Commands |
+| Failure mode | What happens in practice | Why it costs a provider |
+| --- | --- | --- |
+| **Repeated prefill** | The same repo facts, traces, and file summaries are reprocessed every related turn. | More compute before the first output token; higher latency on long prompts. |
+| **KV-cache growth** | Every unnecessary input token contributes attention state. | Higher memory pressure → lower concurrency, harder scheduling. |
+| **Cache misses** | Stable repo facts are mixed with task text, timestamps, logs, and tool output. | Prompt caching and prefix reuse stop working. |
+| **Stale context** | Old decisions and obsolete docs get retrieved because they look relevant. | Wrong patches, repeat loops, lower trust in agent output. |
+| **Unmanaged memory** | Memory grows with no proof, lifecycle, or contradiction handling. | Persistent memory becomes a reliability and security risk. |
+
+---
+
+## The compiler
+
+```text
+repo / files / git / traces / memories
+  → MemoryIR                     typed blocks: source anchor, trust, freshness,
+  → optimizer passes             sensitivity, volatility, token cost, cache role
+  → stable prefix + fresh suffix durable vs volatile, deterministically separated
+  → provider-specific prompt     Anthropic / OpenAI / Gemini / generic
+  → cache manifest               cacheable regions + blake3 stable-prefix hash
+  → provenance ledger            included / excluded / proofs / hashes
+  → optional lockfile            reproducible, auditable context
+```
+
+| Layer | Purpose | Result |
+| --- | --- | --- |
+| **MemoryIR** | A formal IR for repo facts, decisions, traces, tests — each with source anchor, trust, freshness, sensitivity, token cost, and cache role. | Every pack is an explainable compiled artifact, not a loose bundle of text. |
+| **Stable prefix + fresh suffix** | Durable repo knowledge is separated from volatile task state, logs, and errors. The stable prefix excludes task text and is `blake3`-hashed. | Same repo state → same prefix across tasks → real prompt-cache reuse. |
+| **Negative memory** | Stale docs, wrong fixes, generated files, misleading traces, and superseded decisions are remembered as *exclusions*. | The model gets less harmful context, not just more context. |
+| **Freshness proofs** | Memories are tied to source files, hashes, commits, tests, or human confirmation. | Old or unsupported memories are rejected before they enter the prompt. |
+| **KV-aware optimizer** | Context is scored by `utility / cost`, where cost includes tokens and volatility — not relevance alone. | Small high-signal facts beat large weakly-useful files. |
+| **Rehydratable handles** | Packs can ship compact facts plus `mem://file/...#L10-L50` handles. | Exact code is loaded only when needed; tiny upfront token load. |
+| **Ledger + lockfile** | Every pack records included/excluded memory, proof state, cache regions, and hashes. | Agent context becomes reproducible and auditable. |
+
+---
+
+## CAMC-Bench
+
+`memory bench camc` runs **CAMC-Bench** (Cache-Aware Memory Compilation) — a
+deterministic comparison of selection strategies on a bundled synthetic corpus.
+Every number is produced by the real compiler code paths (run it yourself):
+
+### CAMC-Bench (synthetic corpus, model llama-3.1-8b, budget 1500)
+
+| Strategy | Tokens | Cacheable prefix | Reduction vs raw | Stale | Contradictions | Secrets | Task success |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| raw full context | 638 | 0 | 0.0% | 9 | 9 | 3 | 0/3 |
+| grep | 233 | 0 | 63.5% | 3 | 3 | 2 | 0/3 |
+| BM25 | 638 | 0 | 0.0% | 9 | 9 | 3 | 0/3 |
+| embedding retrieval | 638 | 0 | 0.0% | 9 | 9 | 3 | 0/3 |
+| CAMC − no negative memory | 521 | 318 | 18.3% | 0 | 0 | 3 | 3/3 |
+| CAMC − no freshness proofs | 383 | 186 | 40.0% | 9 | 9 | 0 | 0/3 |
+| CAMC − no canonical prefix | 266 | 0 | 58.3% | 0 | 0 | 0 | 3/3 |
+| **full CAMC** | **266** | **186** | **58.3%** | **0** | **0** | **0** | **3/3** |
+
+Read it as an ablation: raw/BM25/embedding leak 9 stale memories, 9 contradictions,
+and 3 secrets and **fail the task oracle**; removing freshness proofs reintroduces
+stale/contradictions; removing the canonical prefix loses all cacheable tokens;
+removing negative memory leaks secrets. **Full CAMC** sends the fewest tokens, keeps
+a cacheable prefix, blocks every unsafe block, and preserves task success.
+
+> Synthetic corpus — it measures the *mechanism*, not real-world win rates. Real-repo
+> and runtime numbers must come from live measurement. Reproduce: `memory bench camc`.
+
+---
+
+## What you can run today
+
+| Area | Commands |
 | --- | --- |
-| **Daily dev** | `memory dev morning` · `dev resume` · `dev next` |
-| **AI context** | `memory compile "fix bug" --budget 1500` · `context write --for cursor` |
-| **Safety** | `memory token-firewall` · `memory doctor` · `memory warnings` |
-| **Memory vault** | `memory remember` · `recall` · `ask` · `inbox review` |
-| **Maps & share** | `memory map --output html` · `pr summary` · `handoff new-dev` |
-| **Tooling** | `memory attach cursor --dry-run` · `agents-score` · `dashboard --html` |
+| **Compile** | `compile` · `cache-manifest` · `cache-hash` · `ir inspect` · `optimize --objective kv_efficiency \| -O3 \| -Oz` |
+| **Freshness & safety** | `prove` · `audit-stale` · `negative add/list/explain` · `explain-exclusions` · `write-firewall` · `poison` |
+| **Cost & cache** | `tokens --provider …` · `kv-sim --model llama-3.1-8b` · `cache-plan` · `kv-report` |
+| **Reproducibility** | `lock` · `lock diff` · `reproduce` · `ledger latest/show/export` · `verify-pack` |
+| **Research** | `minimize --must-include …` · `autopsy` · `fuzz-context` · `debt` · `bench camc` · `paper run` |
+| **Memory vault** | `remember` · `recall` · `ask` · `inbox review` · `entity` · `session` · `insight` |
+| **Provider packs** | `pack --for claude\|codex\|gemini\|cursor\|continue\|mcp` · `attach` · `agents-score` |
 
-<details>
-<summary><strong>Full command reference</strong></summary>
-
-See the complete table in [docs/cli.md](docs/cli.md) — 80+ commands for compile, cache planning, trace compression, entity memory, flight recorder, MCP hardening, and more.
-
-</details>
+Full reference: [docs/cli.md](docs/cli.md). API/SDK surface: [docs/api.md](docs/api.md).
 
 ---
 
-## Why developers use it
+## How it differs from memory products
 
-**Local-first** — SQLite under `.memory.cpp/`. No cloud account required.  
-**Context compiler** — Picks high-signal memory, drops duplicate & stale context.  
-**Token firewall** — Redacts secrets, quarantines injection patterns before prompts.  
-**Provider packs** — Cursor, Claude, Gemini, Continue, MCP — one repo, many outputs.  
-**Evidence-backed** — Every pack cites memory IDs you can inspect and edit.  
+Most memory systems optimize **storage and retrieval**. memory.cpp focuses on what
+happens **after retrieval but before inference**: compilation, cache layout,
+exclusion, proof, and measurement.
 
-Not a hosted SaaS. Not a vector DB you have to operate. A **control plane for AI context** that stays on your machine.
+| System | Primary role | memory.cpp difference |
+| --- | --- | --- |
+| Supermemory | Broad cloud context + retrieval for agents | Local-first, repo-specific, compiler-oriented: cache layout, stale exclusion, prefix stability, measurement |
+| Mem0 | Persistent cross-session/agent memory | Repository context *compilation*, source-anchored freshness, negative memory, KV-aware packing |
+| Honcho | Stateful agent/entity memory | Deterministic local reports, MemoryIR, cache manifests, freshness proofs, reproducible ledgers |
+| Vector DB / RAG | Top-k similarity retrieval | Not top-k: a compiler that excludes, proves, and cache-optimizes the minimal sufficient context |
+| Provider prompt caching | Runtime prefix reuse | memory.cpp *produces* the byte-stable prefix that makes prompt caching actually hit |
 
----
-
-## 60-second demo
-
-```bash
-memory wow
-memory compile "fix billing export bug" --provider openai --budget 1500
-memory doctor "fix billing export bug" --provider openai
-memory agents-score
-```
-
-Artifacts land in `.memory.cpp/reports/` — Markdown packs, doctor JSON, HTML dashboard. Deterministic transcript: `./scripts/demo-terminal.sh`
+Full table: [docs/competitive-positioning.md](docs/competitive-positioning.md).
 
 ---
 
-## Mental model
+## Privacy & safety
 
-```mermaid
-flowchart LR
-  Repo[Repo signals] --> Inbox[Review inbox]
-  Inbox --> Vault[(SQLite memories)]
-  Vault --> Compiler[Context compiler]
-  Compiler --> Packs[AI packs & reports]
-  Vault --> Maps[Maps & handoffs]
-```
-
-Git · docs · terminal · CI · notes → reviewed memory → smaller, safer prompts.
-
----
-
-## Docs & examples
-
-| Start here | Deep dives |
-| --- | --- |
-| [Quickstart](docs/quickstart.md) | [Context compiler](docs/context-compiler.md) |
-| [First five minutes](docs/first-five-minutes.md) | [Inference bottlenecks](docs/inference-bottlenecks.md) |
-| [Developer workflow](docs/dev-workflow.md) | [Safety & privacy](docs/safety.md) |
-| [AI context packs](docs/context-packs.md) | [Competitive positioning](docs/competitive-positioning.md) |
-
-Static examples: [token firewall](examples/token-firewall.md) · [project map](examples/project-map.html) · [PR comment](examples/pr-comment.md)
+Local-first by default — a SQLite vault under `.memory.cpp/`. **No cloud, no
+accounts, no telemetry, no network calls** unless you explicitly enable a connector.
+Secrets are redacted, prompt-injection patterns are quarantined, and the **write
+firewall** screens risky memory *before* it is ever stored. MCP exposes **read-only**
+resources by default. See [SECURITY.md](SECURITY.md) and [docs/safety.md](docs/safety.md).
 
 ---
 
 ## Develop & validate
 
 ```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-./scripts/release-candidate.ps1    # fmt · clippy · test · docs checks
+cargo build -p memory-cli
 ```
 
-CI runs on **Linux, macOS, and Windows**. Release binaries ship with checksums.
-
----
-
-## Privacy
-
-Read-only MCP by default. Terminal capture is opt-in. Candidate memories need approval. See [SECURITY.md](SECURITY.md) · [privacy](docs/privacy.md).
+CI runs on Linux, macOS, and Windows. The core compiler lives in
+[`crates/memory-core`](crates/memory-core/src) (`ir`, `prefix`, `cache_manifest`,
+`freshness`, `negative`, `optimizer`, `tokenizer`, `kv_model`, `ledger`, `lockfile`,
+`minimize`, `rehydrate`, `autopsy`, `fuzz`, `poison`, `debt`, `bench`).
 
 ---
 
@@ -139,6 +205,6 @@ Read-only MCP by default. Terminal capture is opt-in. Candidate memories need ap
 
 MIT © [KirtiRamchandani](https://github.com/KirtiRamchandani)
 
-**Star the repo if your AI tools should stop rereading the same context.**
+**memory.cpp — long-horizon agents need a context compiler, not just a bigger memory store.**
 
 </div>

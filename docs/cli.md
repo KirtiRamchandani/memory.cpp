@@ -356,3 +356,36 @@ memory changed --since "7 days ago"
 memory adoption checklist
 memory release-check
 ```
+
+## Cache-aware compiler (v2)
+
+These commands expose the v2 compiler pipeline. See
+[cache-aware-compiler.md](cache-aware-compiler.md) for the full design.
+
+```text
+compile <task> --provider anthropic --budget 1500   Compile a cache-stable pack
+cache-manifest <task> --provider anthropic           Machine-readable cacheable regions + blake3 hash
+cache-hash <task>                                    Tagged blake3 hash of the stable prefix
+ir inspect <task>                                    Lower retrieved memory into typed MemoryIR blocks
+optimize <task> --objective kv_efficiency|-O3|-Oz    KV-aware utility/cost selection
+tokens <task> --provider openai|anthropic|generic    Provider-tuned token estimate (labeled estimate)
+kv-sim <task> --model llama-3.1-8b [--runtime vllm]   Estimate raw vs compiled KV bytes
+prove [--memory <id>]                                Freshness-prove memories against current sources
+audit-stale                                          List memories that fail their freshness proof
+negative add|list|remove|explain|learn               Memory of what NOT to send
+explain-exclusions <task>                            Why context was excluded (stale/secret/negative)
+lock [<task>] | lock diff                            Write/compare .memory.cpp/context.lock
+reproduce [<task>]                                   Verify a pack reproduces from the lockfile
+ledger latest|show <id>|diff|export                  Prompt provenance audit trail
+verify-pack <file>                                   Check a pack file against the ledger
+rehydrate mem://file/<path>#L10-L50                  Expand a compact handle to exact code
+minimize <task> --must-include a,b                   Smallest sufficient context subset
+autopsy <task> [--missing a,b]                       Explain likely context-side failure causes
+fuzz-context <task>                                  Stress-test a pack; robustness + essential blocks
+poison                                               Memory-poisoning simulator + detection accuracy
+write-firewall --text "..."|--candidate file.json    Screen a risky memory write
+debt [--fix-plan|--badge]                            Context debt score with a fix plan
+bench camc | bench report --html                     CAMC-Bench: compare strategies on a fixture corpus
+paper run|tables|export|figures|appendix             Paper-ready CAMC-Bench artifacts
+wow --for-acquirer                                   One-command acquisition report
+```

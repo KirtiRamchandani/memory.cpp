@@ -1,0 +1,256 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{enumitem}
+
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue}
+
+\title{\textbf{Cache-Aware Memory Compilation for Token-Efficient Coding Agents}}
+\author{memory.cpp}
+\date{Draft --- 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Long-horizon coding agents repeatedly send large, partially stale, and
+hard-to-cache repository context into the model. The cost is not only token
+billing: it appears as repeated prefill work, larger attention state, lower
+prompt-cache reuse, more memory pressure per request, and less reliable agent
+behavior when obsolete docs, duplicate traces, or prior failed attempts enter the
+prompt. We introduce \emph{Cache-Aware Memory Compilation} (CAMC), a local-first
+compiler that converts repository artifacts into a typed intermediate
+representation (MemoryIR), verifies freshness, filters \emph{negative memory},
+canonicalizes a byte-stable prompt prefix, and selects a minimal sufficient
+context under token and KV budgets. On a controlled synthetic benchmark
+(CAMC-Bench) implemented entirely by the production code paths, full CAMC reduces
+prompt tokens by 58.3\% versus raw context while blocking all stale,
+contradictory, and secret material and preserving task success, where raw, BM25,
+and embedding retrieval baselines leak unsafe context and fail the task oracle.
+We are explicit that CAMC reduces \emph{prompt-side} waste and \emph{estimated} KV
+pressure; it does not compress a provider's KV cache, and runtime latency must be
+measured separately.
+\end{abstract}
+
+\section{Introduction}
+
+Coding agents such as Claude Code, Codex, and Cursor are naturally
+long-horizon. Across many turns they accumulate tool traces, file summaries, test
+output, branch-specific details, and repeated user intent. Provider prompt caching
+helps when a repeated prefix stays byte-stable, but coding-agent context routinely
+mixes durable repository knowledge with volatile logs, timestamps, and task text,
+defeating reuse.
+
+The limit being hit is not only the context window; it is \emph{unmanaged context}.
+A prompt can be technically valid while still being wasteful, stale, unsafe, and
+difficult to cache. We argue the right abstraction is a \textbf{compiler}, not a
+retrieval system: a stage that decides what belongs in the stable prefix, what
+belongs in the fresh suffix, what must be excluded, and what should only be
+available by rehydration handle.
+
+\paragraph{Contributions.}
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{MemoryIR}, a typed intermediate representation for repository
+        memory carrying source anchors, trust, freshness, sensitivity, volatility,
+        token cost, and cache role (\S\ref{sec:ir}).
+  \item \textbf{Semantic prefix canonicalization}: a deterministic, task-independent
+        stable prefix with a blake3 content hash, so the same repo state yields the
+        same cache key across tasks (\S\ref{sec:prefix}).
+  \item \textbf{Negative memory} and \textbf{freshness proofs}: explicit exclusion
+        of stale/harmful context and source-anchored validity checks
+        (\S\ref{sec:safety}).
+  \item A \textbf{KV-aware optimizer} that selects context by utility-per-cost under
+        token and KV budgets (\S\ref{sec:opt}).
+  \item \textbf{CAMC-Bench}, a reproducible benchmark with an ablation that isolates
+        the contribution of each component (\S\ref{sec:bench}).
+\end{enumerate}
+
+\section{The systems problem}
+
+Table~\ref{tab:failures} summarizes the failure modes CAMC targets and why they
+matter to an inference provider.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}p{2.6cm}p{5.2cm}p{5.2cm}@{}}
+\toprule
+\textbf{Failure mode} & \textbf{What happens in practice} & \textbf{Why it matters} \\
+\midrule
+Repeated prefill & Same repo facts and traces reprocessed each related turn. & More compute before the first token; higher latency. \\
+KV-cache growth & Every unnecessary input token contributes attention state. & Memory pressure reduces concurrency; harder scheduling. \\
+Cache misses & Stable facts mixed with task text, timestamps, logs, tool output. & Prompt caching and prefix reuse stop working. \\
+Stale context & Obsolete docs retrieved because they look relevant. & Wrong patches, repeat loops, lower trust. \\
+Unmanaged memory & Memory grows without proof, lifecycle, or contradiction handling. & Persistent memory becomes a reliability and security risk. \\
+\bottomrule
+\end{tabular}
+\caption{Context failure modes addressed by CAMC.}
+\label{tab:failures}
+\end{table}
+
+\section{MemoryIR}
+\label{sec:ir}
+
+CAMC lowers every retrieved memory into a typed \texttt{IrBlock}. Each block
+records its kind (fact, invariant, decision, bug, fix, API contract, file/trace
+summary, test recipe, negative memory, security warning, \ldots), a source anchor
+(file, line range, commit, content hash), scalar scores in $[0,1]$ for relevance,
+trust, freshness, and sensitivity, a \emph{volatility} class, a \emph{cache role}
+(stable prefix, fresh suffix, or excluded), and an estimated token cost.
+Representing context as typed IR --- rather than opaque retrieved strings --- is
+what lets every later pass reason uniformly about cost, safety, and cache behavior,
+and makes each compiled pack explainable rather than a loose bundle of text.
+
+\section{Semantic prefix canonicalization}
+\label{sec:prefix}
+
+The \textbf{stable prefix} may contain only deterministic, low-volatility material:
+repo identity, rules, durable architecture facts, API contracts, invariants,
+high-confidence decisions, safe tool-use rules, and negative-memory exclusions. It
+must never contain task text, current errors, failing test output, tool traces,
+timestamps, or random identifiers; those constitute the \textbf{fresh suffix}.
+
+The prefix is rendered deterministically (sections sorted, de-duplicated, whitespace
+normalized) and hashed with blake3:
+\[
+\texttt{stable\_prefix\_hash} = \texttt{memprefix:v1:blake3:}\,H(\text{canonical prefix bytes}).
+\]
+Because $H$ is computed over prefix \emph{bytes} --- not the provider or task ---
+the same repository state yields an identical cache key across different tasks. This
+is the property that makes provider prompt caching and runtime prefix reuse actually
+hit. A cache manifest records the cacheable region $[0, t_s)$ and the
+non-cacheable region $[t_s, t_s + t_f)$, the repo state hash, and estimated repeated
+tokens avoided under reuse.
+
+\section{Negative memory and freshness proofs}
+\label{sec:safety}
+
+\paragraph{Negative memory.} Most systems model only what to include. CAMC records
+what \emph{not} to send: stale docs, superseded decisions, wrong fixes, generated
+files, duplicate context, misleading traces, security risks, prompt-injection
+sources, low-signal files, and obsolete APIs. Matching candidates are excluded
+deterministically with a stated reason.
+
+\paragraph{Freshness proofs.} Before a memory enters a pack it must prove validity:
+its source file and line still exist, its span hash matches, its commit is
+reachable, it has not expired, no newer memory contradicts it, its source is
+reliable enough, and (optionally) a human confirmed it. Each proof is serializable
+with a verdict in \{fresh, stale, unverifiable\} and a proof hash, so stale or
+unsupported memory is rejected pre-inference.
+
+\paragraph{Write firewall.} Persistent memory is an attack surface. A write firewall
+screens candidate writes for injection markers, secret-like material, and untrusted
+low-confidence sources, quarantining them before they can be silently re-injected
+into future prompts.
+
+\section{KV-aware optimization}
+\label{sec:opt}
+
+Selection is not relevance-only. Each block is scored by utility per cost:
+\[
+\text{utility} = \text{relevance} \times \text{trust} \times \text{freshness} \times \text{importance},
+\quad
+\text{cost} = \text{tokens} \times (1 + \text{volatility}),
+\quad
+\text{score} = \frac{\text{utility}}{\text{cost}}.
+\]
+Objectives (\texttt{max\_quality}, \texttt{min\_tokens}, \texttt{kv\_efficiency},
+\texttt{cache\_hit\_rate}, \texttt{freshness\_first}, \texttt{security\_first},
+\texttt{minimal\_sufficient}) reweight utility and cost; compiler-style levels
+\texttt{-O0..-Oz} map to objectives. Invariants and security warnings are always
+retained. The optimizer greedily selects highest-scoring blocks under a token budget
+and an optional KV-byte ceiling derived from a model profile.
+
+\paragraph{KV estimate.} For a model with $L$ layers, $h$ KV heads, head dimension
+$d$, and $b$ bytes per element, the KV footprint of a sequence of length $n$ is
+estimated as $\text{kv\_bytes} \approx n \cdot L \cdot h \cdot d \cdot 2 \cdot b
+\cdot q$, where $q$ is an optional quantization factor. We stress this is a
+prompt-side \emph{estimate}: CAMC reduces the $n$ that a runtime must process; it
+does not compress the provider's KV cache.
+
+\section{CAMC-Bench}
+\label{sec:bench}
+
+CAMC-Bench compares context-selection strategies on a bundled synthetic
+repo-memory corpus. The corpus contains durable facts (an invariant, a decision, a
+package-manager rule, a fix, a test recipe), superseded/contradictory memories, a
+secret, and distractors. Three tasks each declare an oracle: the selection must
+include the task's essential memories \emph{and} include no contradictions. Every
+metric in Table~\ref{tab:bench} is produced by the production IR, negative-memory,
+freshness, optimizer, and KV code paths --- not hard-coded --- and is reproducible
+via \texttt{memory bench camc}.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+\textbf{Strategy} & \textbf{Tokens} & \textbf{Cacheable} & \textbf{Reduct.} & \textbf{Stale} & \textbf{Contra.} & \textbf{Secrets} & \textbf{Success} \\
+\midrule
+raw full context & 638 & 0 & 0.0\% & 9 & 9 & 3 & 0/3 \\
+grep & 233 & 0 & 63.5\% & 3 & 3 & 2 & 0/3 \\
+BM25 & 638 & 0 & 0.0\% & 9 & 9 & 3 & 0/3 \\
+embedding retrieval & 638 & 0 & 0.0\% & 9 & 9 & 3 & 0/3 \\
+CAMC $-$ no negative memory & 521 & 318 & 18.3\% & 0 & 0 & 3 & 3/3 \\
+CAMC $-$ no freshness proofs & 383 & 186 & 40.0\% & 9 & 9 & 0 & 0/3 \\
+CAMC $-$ no canonical prefix & 266 & 0 & 58.3\% & 0 & 0 & 0 & 3/3 \\
+\textbf{full CAMC} & \textbf{266} & \textbf{186} & \textbf{58.3\%} & \textbf{0} & \textbf{0} & \textbf{0} & \textbf{3/3} \\
+\bottomrule
+\end{tabular}
+\caption{CAMC-Bench (synthetic corpus, llama-3.1-8b profile, budget 1500). Tokens:
+total context tokens. Cacheable: stable-prefix tokens. Reduct.: reduction vs raw.
+Stale / Contra. / Secrets: unsafe blocks present. Success: tasks passing the oracle.}
+\label{tab:bench}
+\end{table}
+
+\paragraph{Reading the ablation.} Raw, BM25, and embedding baselines fit the small
+corpus within budget and therefore reduce nothing, while leaking 9 stale memories,
+9 contradictions, and 3 secrets and \emph{failing every task} (the oracle rejects
+contradictions). Removing freshness proofs reintroduces stale and contradictory
+context (success drops to 0/3); removing the canonical prefix forfeits all cacheable
+tokens; removing negative memory leaks secrets. Only \textbf{full CAMC}
+simultaneously minimizes tokens, preserves a cacheable prefix, blocks all unsafe
+material, and passes every task.
+
+\section{Reproducibility: ledgers and lockfiles}
+
+Every compiled pack can emit a provenance ledger entry (included and excluded
+memory with reasons, proofs passed/failed, cache regions, token tradeoffs, and a
+pack hash) and a deterministic lockfile (compiler version, repo state hash, memory
+ids, source and proof hashes, negative-memory version, stable-prefix and
+fresh-suffix hashes, token counts). Because the stable prefix is task-independent,
+\texttt{reproduce} verifies it matches byte-for-byte across runs.
+
+\section{Related work}
+
+\textbf{Agent memory systems} (Supermemory, Mem0, Honcho) optimize storage and
+retrieval across sessions. \textbf{Retrieval} (BM25, embeddings, RAG) ranks and
+returns top-$k$ candidates. \textbf{Provider prompt caching} reuses a stable prefix
+at runtime. CAMC is complementary and sits \emph{after retrieval but before
+inference}: it compiles, excludes, proves, and cache-optimizes the minimal
+sufficient context, and it \emph{produces} the byte-stable prefix that prompt
+caching needs.
+
+\section{Limitations}
+
+CAMC-Bench is synthetic and small by design: it measures the compilation mechanism,
+not real-world win rates. Token counts use estimators unless a provider tokenizer is
+enabled. KV figures are prompt-side estimates; runtime latency and memory must be
+measured against a real stack (vLLM, SGLang, llama.cpp, Ollama). Freshness and
+negative-memory heuristics are conservative and can over- or under-exclude; human
+review remains available for high-impact memory.
+
+\section{Conclusion}
+
+Long-horizon coding agents do not primarily need a bigger memory store; they need a
+\emph{context compiler}. By compiling repository history into freshness-proven,
+security-filtered, cache-stable, minimal context --- and by measuring the result ---
+CAMC reduces prompt-side waste and estimated KV pressure while preserving task
+success, and leaves behind a reproducible, auditable record of exactly what the
+model was asked to process.
+
+\end{document}

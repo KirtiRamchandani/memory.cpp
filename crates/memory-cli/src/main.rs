@@ -10380,7 +10380,9 @@ fn build_ai_context_report(
         }));
     }
 
-    let stable_prefix = render_stable_prefix(&facts, &decisions, &rules, &do_not_touch);
+    // The stable prefix is built from durable repo memory only and is
+    // independent of the task, so its blake3 hash is reusable across tasks.
+    let stable_prefix = durable_stable_prefix(engine, &workspace)?;
     let fresh_suffix = render_fresh_suffix(task, &failures, &commands, &important);
     let cacheable_prefix_tokens = estimate_tokens(&stable_prefix);
     let fresh_suffix_tokens = estimate_tokens(&fresh_suffix);
@@ -10451,6 +10453,86 @@ fn render_stable_prefix(
     push_markdown_list(&mut out, "Rules and mistake firewall", rules, 8);
     push_markdown_list(&mut out, "Do-not-touch warnings", do_not_touch, 6);
     out
+}
+
+/// Build a *task-independent* stable prefix from durable repo memories.
+///
+/// The retrieval query deliberately excludes the current task, only durable
+/// kinds are kept, and every section is sorted/de-duplicated. As a result the
+/// same repository state yields the same stable prefix --- and the same blake3
+/// cache key --- regardless of which task is being compiled. This is what makes
+/// `memory cache-hash "task A"` and `memory cache-hash "task B"` match.
+fn durable_stable_prefix(engine: &MemoryEngine, workspace: &str) -> Result<String> {
+    let query = "repository rules invariants architecture decisions api contracts conventions package manager test commands do not touch".to_string();
+    let candidates = engine.search(
+        RecallQuery::new(query)
+            .workspace(workspace.to_string())
+            .limit(60)
+            .candidate_pool(120)
+            .include_content(true),
+    )?;
+    let mut facts = Vec::new();
+    let mut decisions = Vec::new();
+    let mut rules = Vec::new();
+    let mut do_not_touch = Vec::new();
+    let mut seen = HashSet::new();
+    for item in &candidates {
+        let memory = &item.memory;
+        if is_memory_stale_or_blocked(memory) {
+            continue;
+        }
+        let text = memory_text(memory);
+        if detect_sensitive_reason(&text).is_some() || has_prompt_injection_warning(&text) {
+            continue;
+        }
+        // Only durable material belongs in a byte-stable prefix; task-volatile
+        // kinds (bugs, failures, traces) are excluded by design.
+        let is_volatile = memory.attributes.tags.iter().any(|tag| {
+            matches!(
+                tag.as_str(),
+                "failure" | "bug" | "trace" | "tool_trace_summary" | "agent_trace_summary"
+            )
+        }) || matches!(
+            memory.kind,
+            MemoryKind::Bug | MemoryKind::Event | MemoryKind::Task
+        );
+        if is_volatile {
+            continue;
+        }
+        let key = normalized_dedupe_key(&text);
+        if !key.is_empty() && !seen.insert(key) {
+            continue;
+        }
+        let line = memory.summary.trim().to_string();
+        if line.is_empty() {
+            continue;
+        }
+        let lower = text.to_ascii_lowercase();
+        if memory.attributes.tags.iter().any(|tag| tag == "mistake")
+            || matches!(memory.kind, MemoryKind::Workflow | MemoryKind::Preference)
+            || lower.contains("never ")
+            || lower.contains("do not")
+        {
+            rules.push(line.clone());
+        } else if matches!(memory.kind, MemoryKind::Decision) {
+            decisions.push(line.clone());
+        } else {
+            facts.push(line.clone());
+        }
+        if lower.contains("do not") || lower.contains("never ") || lower.contains("do-not-touch") {
+            do_not_touch.push(line.clone());
+        }
+    }
+    for list in [&mut facts, &mut decisions, &mut rules, &mut do_not_touch] {
+        list.sort();
+        list.dedup();
+    }
+    Ok(render_stable_prefix(
+        &facts,
+        &decisions,
+        &rules,
+        &do_not_touch,
+    ))
 }
 
 fn render_fresh_suffix(
@@ -22858,6 +22940,63 @@ mod tests {
             .any(|item| item.contains("Stale memory")));
         assert!(report.kv_positions_avoided() > 0);
         assert!(report.signal_density_after() >= report.signal_density_before());
+        drop(engine);
+        fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn stable_prefix_hash_is_task_independent_across_cli() -> Result<()> {
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_nanos();
+        let dir = env::temp_dir().join(format!("memory-cpp-prefix-test-{unique}"));
+        fs::create_dir_all(&dir)?;
+        let engine = MemoryEngine::open_default(dir.join("memory.db"))?;
+        engine.create_workspace("default", "test workspace", "project", true)?;
+        engine.remember(
+            NewMemory::new("Billing exports must be deterministic.")
+                .scope("default")
+                .tag("invariant")
+                .confidence(0.95),
+        )?;
+        engine.remember(
+            NewMemory::new("Use pnpm for installs. Never npm.")
+                .kind(MemoryKind::Workflow.as_str())
+                .scope("default")
+                .tag("mistake")
+                .confidence(0.95),
+        )?;
+
+        let a = build_ai_context_report(
+            &engine,
+            "fix the billing export bug",
+            "anthropic",
+            1500,
+            Some("default".to_string()),
+        )?;
+        let b = build_ai_context_report(
+            &engine,
+            "add a brand new oauth provider",
+            "anthropic",
+            1500,
+            Some("default".to_string()),
+        )?;
+
+        // Same repo state + different tasks -> identical stable prefix (and hash).
+        assert_eq!(a.stable_prefix, b.stable_prefix);
+        assert_eq!(
+            memory_core::stable_prefix_hash(&a.stable_prefix),
+            memory_core::stable_prefix_hash(&b.stable_prefix)
+        );
+        // The stable prefix must not contain the task text.
+        assert!(!a.stable_prefix.to_lowercase().contains("oauth"));
+        assert!(!a
+            .stable_prefix
+            .to_lowercase()
+            .contains("billing export bug"));
+        // But the fresh suffix must change with the task.
+        assert_ne!(a.fresh_suffix, b.fresh_suffix);
         drop(engine);
         fs::remove_dir_all(dir)?;
         Ok(())

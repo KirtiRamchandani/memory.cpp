@@ -3065,6 +3065,18 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
             let engine = build_engine_from_options(&options)?;
             merge_command(&engine, &rest)?;
         }
+        "stats" => {
+            // Routed through the pre-parser to avoid a Clap stack-overflow on
+            // the large command enum.
+            let engine = build_engine_from_options(&options)?;
+            let ws = cli_flag_value(&rest, "--workspace");
+            stats_command(
+                &engine,
+                ws.as_ref(),
+                cli_flag(&rest, "--conflicts"),
+                cli_flag(&rest, "--json"),
+            )?;
+        }
         "invariants" => {
             let engine = build_engine_from_options(&options)?;
             invariants_command(&engine, &rest)?;
@@ -3962,6 +3974,7 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "gc",
         "contradictions",
         "merge",
+        "stats",
         "invariants",
         "contract",
         "autolearn",

@@ -1,198 +1,384 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="memory.cpp helps your repo remember what happened, why it changed, what broke, how it was fixed, and what to do next - locally and safely.">
-  <meta property="og:title" content="memory.cpp - Your repo remembers">
-  <meta property="og:description" content="Local repo memory for developers and AI coding tools.">
+  <meta name="description" content="memory.cpp is a local-first, pre-inference context compiler for coding agents. It turns repo history into freshness-proven, security-filtered, cache-stable context packs.">
+  <meta property="og:title" content="memory.cpp — cache-aware repo memory for coding agents">
+  <meta property="og:description" content="Remember more. Send less. Cache smarter. A local-first context compiler for Claude Code, Codex, Cursor, Gemini, and local models.">
   <meta property="og:image" content="assets/og.svg">
-  <title>memory.cpp - Your repo remembers</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta name="theme-color" content="#0b1020">
+  <title>memory.cpp — cache-aware repo memory for coding agents</title>
+  <style>
+    :root{
+      --bg:#0b1020; --bg-soft:#11172b; --panel:#141b30; --panel-2:#0e1426;
+      --border:#23304d; --text:#e7ecf6; --muted:#9aa6c2; --dim:#6c789a;
+      --accent:#7b8cfa; --accent-2:#33d6a6; --warn:#ffbd5b; --danger:#ff6b6b;
+      --radius:14px; --maxw:1120px;
+      --mono:"Cascadia Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+      --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    }
+    [data-theme="light"]{
+      --bg:#f7f9fc; --bg-soft:#eef2f9; --panel:#ffffff; --panel-2:#f1f4fb;
+      --border:#dde4f0; --text:#0f1730; --muted:#52608a; --dim:#8893b0;
+      --accent:#4655e6; --accent-2:#13a97f;
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
+    a{color:inherit;text-decoration:none}
+    .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+    .muted{color:var(--muted)}
+    code,kbd{font-family:var(--mono)}
+
+    /* nav */
+    header.nav{position:sticky;top:0;z-index:50;backdrop-filter:saturate(140%) blur(10px);
+      background:color-mix(in srgb,var(--bg) 82%,transparent);border-bottom:1px solid var(--border)}
+    .nav-inner{display:flex;align-items:center;gap:18px;height:62px}
+    .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.2px}
+    .brand .dot{width:11px;height:11px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 0 14px var(--accent)}
+    .nav-links{display:flex;gap:22px;margin-left:auto;align-items:center}
+    .nav-links a{color:var(--muted);font-size:.94rem}
+    .nav-links a:hover{color:var(--text)}
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:10px;border:1px solid var(--border);
+      background:var(--panel);color:var(--text);font-weight:600;font-size:.92rem;cursor:pointer;transition:.15s}
+    .btn:hover{transform:translateY(-1px);border-color:var(--accent)}
+    .btn.primary{background:linear-gradient(135deg,var(--accent),#5a6bf0);border-color:transparent;color:#fff}
+    .btn.ghost{background:transparent}
+    #themeToggle{font-size:1rem;line-height:1;padding:9px 12px}
+
+    /* hero */
+    .hero{padding:72px 0 36px;position:relative;overflow:hidden}
+    .hero::before{content:"";position:absolute;inset:-40% 30% auto -10%;height:520px;
+      background:radial-gradient(60% 60% at 30% 30%,color-mix(in srgb,var(--accent) 26%,transparent),transparent 70%);filter:blur(20px);z-index:0}
+    .hero-grid{display:grid;grid-template-columns:1.05fr 1fr;gap:46px;align-items:center;position:relative;z-index:1}
+    .eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:.8rem;letter-spacing:.12em;text-transform:uppercase;
+      color:var(--accent-2);font-weight:700;border:1px solid var(--border);background:var(--panel);padding:6px 12px;border-radius:999px}
+    h1{font-size:clamp(2.2rem,4.6vw,3.4rem);line-height:1.08;margin:18px 0 8px;letter-spacing:-.02em}
+    h1 .grad{background:linear-gradient(120deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+    .tagline{font-size:1.05rem;color:var(--text);font-weight:600;margin:0 0 6px}
+    .lede{font-size:1.06rem;color:var(--muted);max-width:36ch}
+    .cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}
+    .hero-note{margin-top:18px;font-size:.86rem;color:var(--dim);max-width:46ch}
+
+    /* terminal frame */
+    .term{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--panel-2);
+      box-shadow:0 24px 70px -30px rgba(0,0,0,.6)}
+    .term-bar{display:flex;align-items:center;gap:7px;padding:11px 14px;background:var(--bg-soft);border-bottom:1px solid var(--border)}
+    .term-bar i{width:11px;height:11px;border-radius:50%;display:inline-block}
+    .term-bar i:nth-child(1){background:#ff5f56}.term-bar i:nth-child(2){background:#ffbd2e}.term-bar i:nth-child(3){background:#27c93f}
+    .term-bar strong{margin-left:8px;color:var(--dim);font-weight:600;font-size:.8rem;font-family:var(--mono)}
+    .term img{display:block;width:100%}
+
+    /* stat band */
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:40px 0 8px}
+    .stat{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px}
+    .stat b{display:block;font-size:1.7rem;letter-spacing:-.02em;background:linear-gradient(120deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+    .stat span{font-size:.86rem;color:var(--muted)}
+
+    section{padding:54px 0;border-top:1px solid var(--border)}
+    .sec-head{max-width:62ch;margin-bottom:30px}
+    .sec-head h2{font-size:clamp(1.5rem,3vw,2.1rem);margin:0 0 8px;letter-spacing:-.01em}
+    .sec-head p{color:var(--muted);margin:0}
+    .kicker{color:var(--accent-2);font-weight:700;font-size:.82rem;letter-spacing:.1em;text-transform:uppercase}
+
+    .grid{display:grid;gap:16px}
+    .g3{grid-template-columns:repeat(3,1fr)}
+    .g2{grid-template-columns:repeat(2,1fr)}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:22px}
+    .card h3{margin:0 0 6px;font-size:1.06rem}
+    .card p{margin:0;color:var(--muted);font-size:.95rem}
+    .card .ico{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;margin-bottom:12px;
+      background:color-mix(in srgb,var(--accent) 16%,transparent);font-size:1.1rem}
+
+    pre{margin:0;background:var(--panel-2);border:1px solid var(--border);border-radius:var(--radius);
+      padding:18px 20px;overflow:auto;font-family:var(--mono);font-size:.9rem;line-height:1.7}
+    pre .c{color:var(--dim)}
+    pre .k{color:var(--accent)}
+    pre .g{color:var(--accent-2)}
+
+    /* pipeline */
+    .pipe{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;margin-bottom:26px}
+    .pipe .step{flex:1 1 150px;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
+    .pipe .step b{display:block;font-size:.96rem}
+    .pipe .step span{font-size:.82rem;color:var(--dim)}
+    .pipe .arr{align-self:center;color:var(--dim)}
+
+    /* table */
+    .tablewrap{overflow:auto;border:1px solid var(--border);border-radius:var(--radius)}
+    table{border-collapse:collapse;width:100%;font-size:.9rem}
+    th,td{padding:10px 14px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
+    th:first-child,td:first-child{text-align:left}
+    thead th{background:var(--bg-soft);color:var(--muted);font-weight:600;position:sticky;top:0}
+    tr.win td{background:color-mix(in srgb,var(--accent-2) 12%,transparent);font-weight:700}
+    .bench-img{margin-top:18px;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel);padding:14px}
+    .bench-img img{width:100%;display:block}
+
+    .pill{display:inline-block;font-size:.78rem;color:var(--accent-2);border:1px solid var(--border);background:var(--panel);
+      border-radius:999px;padding:4px 10px;margin:0 6px 6px 0}
+
+    details{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:4px 18px;margin-bottom:10px}
+    summary{cursor:pointer;padding:14px 0;font-weight:600;list-style:none}
+    summary::-webkit-details-marker{display:none}
+    summary::before{content:"+";color:var(--accent);margin-right:10px;font-weight:700}
+    details[open] summary::before{content:"–"}
+    details p{margin:0 0 16px;color:var(--muted)}
+
+    .note{font-size:.85rem;color:var(--dim);border-left:3px solid var(--accent);padding:10px 14px;background:var(--panel);border-radius:0 10px 10px 0}
+
+    footer{border-top:1px solid var(--border);padding:40px 0;color:var(--muted)}
+    .foot-grid{display:flex;flex-wrap:wrap;gap:30px;justify-content:space-between;align-items:flex-start}
+    .foot-links{display:flex;gap:30px;flex-wrap:wrap}
+    .foot-links a{color:var(--muted);font-size:.92rem}
+    .foot-links a:hover{color:var(--text)}
+
+    @media (max-width:880px){
+      .hero-grid,.g3,.g2{grid-template-columns:1fr}
+      .stats{grid-template-columns:repeat(2,1fr)}
+      .nav-links a:not(.btn){display:none}
+    }
+  </style>
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="#top" aria-label="memory.cpp home"><span class="dot"></span>memory.cpp</a>
-    <nav class="single-nav" aria-label="Single page navigation">
-      <a href="#start">Start</a>
-      <a href="#workflow">Workflow</a>
-      <a href="#context">AI Context</a>
-      <a href="#compiler">Compiler</a>
-      <a href="#maps">Maps</a>
-      <a href="#share">Share</a>
-      <a href="#docs">Docs</a>
-      <a href="#trust">Trust</a>
-      <a href="#release">Release</a>
-      <button id="themeToggle" type="button">Dark mode</button>
-    </nav>
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top"><span class="dot"></span>memory.cpp</a>
+      <nav class="nav-links">
+        <a href="#problem">Why</a>
+        <a href="#compiler">Compiler</a>
+        <a href="#benchmark">Benchmark</a>
+        <a href="#start">Quickstart</a>
+        <a href="https://github.com/KirtiRamchandani/memory.cpp/tree/main/docs">Docs</a>
+        <button id="themeToggle" class="btn ghost" type="button" aria-label="Toggle theme">☀︎</button>
+        <a class="btn primary" href="https://github.com/KirtiRamchandani/memory.cpp">GitHub ★</a>
+      </nav>
+    </div>
   </header>
 
   <main id="top">
-    <section class="desktop-hero landing-hero" id="start">
-      <aside class="folder-dock" aria-label="Feature shortcuts">
-        <a href="#workflow" class="folder amber"><span></span>Daily habit</a>
-        <a href="#context" class="folder violet"><span></span>AI context</a>
-        <a href="#maps" class="folder mint"><span></span>Repo maps</a>
-        <a href="#trust" class="folder rose"><span></span>Local trust</a>
-      </aside>
-
-      <section class="window hero-window">
-        <div class="window-bar"><span></span><span></span><span></span><strong>your-repo-remembers</strong></div>
-        <div class="window-body">
-          <p class="eyebrow">Local-first engineering memory</p>
-          <h1>Your repo remembers.</h1>
-          <p class="lede">memory.cpp helps your repo remember what happened, why it changed, what broke, how it was fixed, what to do next, and what AI coding tools should know.</p>
-          <div class="hero-commands">
-            <code>memory dev morning</code>
-            <code>memory compile "fix bug" --provider openai</code>
-            <code>memory map --type evolution --output html</code>
+    <!-- HERO -->
+    <section class="hero" style="border-top:0">
+      <div class="wrap hero-grid">
+        <div>
+          <span class="eyebrow">Local-first context compiler</span>
+          <h1>Cache-aware repo memory for <span class="grad">coding agents</span>.</h1>
+          <p class="tagline">Remember more. Send less. Cache smarter.</p>
+          <p class="lede">memory.cpp turns repository history — decisions, fixes, traces, tests, rules — into freshness-proven, security-filtered, cache-stable context packs <em>before</em> the model sees the request.</p>
+          <div class="cta">
+            <a class="btn primary" href="#start">Get started</a>
+            <a class="btn" href="#benchmark">See the benchmark</a>
+            <a class="btn ghost" href="https://github.com/KirtiRamchandani/memory.cpp">View source</a>
           </div>
-          <div class="actions">
-            <a class="button primary" href="pages/install.html">Install</a>
-            <a class="button" href="pages/tour.html">5-minute tour</a>
-            <a class="button" href="https://github.com/KirtiRamchandani/memory.cpp">Star on GitHub</a>
-          </div>
+          <p class="hero-note">The cheapest token is the one the model never has to process. memory.cpp reduces prompt-side waste and <em>estimated</em> KV pressure — it does not compress a provider's KV cache.</p>
         </div>
-      </section>
+        <div class="term">
+          <div class="term-bar"><i></i><i></i><i></i><strong>memory.cpp — demo</strong></div>
+          <img src="assets/memorycpp-demo.gif" alt="memory.cpp terminal demo: compile a cache-stable pack, identical prefix hash across tasks, write firewall, CAMC-Bench" loading="lazy">
+        </div>
+      </div>
 
-      <section class="window terminal-window">
-        <div class="window-bar"><span></span><span></span><span></span><strong>first-five-minutes</strong></div>
-        <pre class="terminal"><code>$ memory setup --developer --yes
-$ memory dev morning
-$ memory compile "fix checkout bug" --provider openai --budget 1500
-$ memory share status
-$ memory adoption checklist</code></pre>
-      </section>
-    </section>
-
-    <section class="proof-strip" aria-label="Product promises">
-      <div><strong>Local SQLite</strong><span>No cloud account required.</span></div>
-      <div><strong>Read-only MCP</strong><span>AI tools get context safely.</span></div>
-      <div><strong>Shareable artifacts</strong><span>Markdown and HTML you choose to send.</span></div>
-      <div><strong>Daily workflow</strong><span>Resume work without archaeology.</span></div>
+      <div class="wrap">
+        <div class="stats">
+          <div class="stat"><b>58.3%</b><span>fewer context tokens (CAMC-Bench, full CAMC vs raw)</span></div>
+          <div class="stat"><b>0</b><span>stale · contradictory · secret blocks leaked</span></div>
+          <div class="stat"><b>~89%</b><span>smaller than a naive docs paste (dogfooded on this repo)</span></div>
+          <div class="stat"><b>blake3</b><span>byte-stable prefix hash, identical across tasks</span></div>
+        </div>
+        <p class="note" style="margin-top:14px">Every number is reproducible — run <code>memory bench camc</code> and <code>python scripts/benchmark.py</code>.</p>
+      </div>
     </section>
 
-    <section class="section-head" id="workflow">
-      <p class="eyebrow">Daily loop</p>
-      <h2>Know what happened, what broke, and what to do next.</h2>
-      <p>Run one command in the morning, one before a PR, and one when you hand work to an assistant.</p>
-    </section>
-    <section class="grid three feature-row">
-      <article class="card"><h3>Morning brief</h3><p>Summarizes recent work, branch state, pending candidates, decisions, bugs/fixes, and the next command.</p><pre><code>memory dev morning
-memory today
-memory next</code></pre></article>
-      <article class="card"><h3>Resume work</h3><p>Reconstructs interrupted work from memories, Git, terminal commands, TODOs, and known failures.</p><pre><code>memory dev resume
-memory rewind last-week
-memory timeline week</code></pre></article>
-      <article class="card"><h3>Stateful memory</h3><p>Tracks local people, agents, projects, sessions, events, and insights without cloud sync.</p><pre><code>memory entity create --type person --name Ada
-memory session start --goal "finish release"
-memory insight derive</code></pre><a href="../docs/stateful-memory.md">stateful memory docs</a></article>
-      <article class="card"><h3>Repo health</h3><p>Checks docs freshness, stale decisions, privacy status, setup state, and practical release readiness.</p><pre><code>memory dev health
-memory adoption status
-memory release-check</code></pre></article>
-    </section>
-
-    <section class="split" id="context">
-      <div class="window"><div class="window-bar"><span></span><span></span><span></span><strong>assistant-context</strong></div><div class="window-body"><h2>AI context packs</h2><p>Give Cursor, Codex, Claude, Continue, VS Code, or a local model a clean, cited project brief instead of guessing from a blank prompt.</p><pre><code>memory context write --for cursor --output .memory.cpp/context/cursor.md
-memory attach cursor --dry-run
-memory attach verify cursor --dry-run</code></pre><p class="output">Includes project summary, current task, important files, commands, tests, pitfalls, TODOs, and safety notes.</p><div class="link-row"><a href="pages/integrations.html">Integrations</a><a href="pages/ai-assistant-integration.html">AI guide</a><a href="../docs/context-packs.md">Context docs</a></div></div></div>
-      <div class="window"><div class="window-bar"><span></span><span></span><span></span><strong>reviewer-context</strong></div><div class="window-body"><h2>PR and handoff context</h2><p>Generate Markdown for reviewers, new developers, maintainers, and AI agents without building team sync or cloud accounts.</p><pre><code>memory pr summary --base main --output .memory.cpp/share/pr-summary.md
-memory handoff new-dev --output .memory.cpp/handoff
-memory share onboarding</code></pre><p class="output">Private-safe by default. Review the artifact, then share only what you choose.</p><div class="link-row"><a href="pages/pr-workflow.html">PR workflow</a><a href="pages/handoff.html">Handoff</a><a href="pages/shareable-artifacts.html">Share artifacts</a></div></div></div>
+    <!-- PROBLEM -->
+    <section id="problem">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="kicker">The systems problem</span>
+          <h2>Unmanaged context is expensive at scale.</h2>
+          <p>A prompt can be technically valid while still being wasteful, stale, unsafe, and impossible to cache. Coding agents are long-horizon — they rebuild the same context every turn.</p>
+        </div>
+        <div class="grid g3">
+          <div class="card"><div class="ico">♻️</div><h3>Repeated prefill</h3><p>The same repo facts and traces are reprocessed every related turn — more compute before the first token.</p></div>
+          <div class="card"><div class="ico">📈</div><h3>KV-cache growth</h3><p>Every unnecessary input token adds attention state, lowering concurrency and complicating scheduling.</p></div>
+          <div class="card"><div class="ico">❌</div><h3>Cache misses</h3><p>Stable facts mixed with task text, timestamps, and logs defeat prompt caching and prefix reuse.</p></div>
+          <div class="card"><div class="ico">🗑️</div><h3>Stale context</h3><p>Obsolete docs and prior failed attempts get retrieved because they look relevant — wrong patches follow.</p></div>
+          <div class="card"><div class="ico">🛡️</div><h3>Unmanaged memory</h3><p>Memory grows with no proof, lifecycle, or contradiction handling — a reliability and security risk.</p></div>
+          <div class="card"><div class="ico">🧩</div><h3>It's a compiler problem</h3><p>Not a retrieval problem. Decide what to keep stable, what is fresh, what to exclude, what to rehydrate.</p></div>
+        </div>
+      </div>
     </section>
 
-    <section class="section-head" id="compiler">
-      <p class="eyebrow">Context compiler</p>
-      <h2>Remember more. Send less. Run faster.</h2>
-      <p>Stop paying AI to reread the same context. memory.cpp compiles local repo memory into smaller task packs and reports what stayed out.</p>
-    </section>
-    <section class="grid three feature-row">
-      <article class="card"><h3>Token firewall</h3><p>Blocks duplicated, stale, oversized, or unsafe context before it reaches a prompt.</p><pre><code>memory token-firewall "fix checkout bug"
-memory doctor "add CSV export" --provider gemini</code></pre><a href="../examples/token-firewall.md">example output</a></article>
-      <article class="card"><h3>Provider cache plan</h3><p>Separates stable repo memory from fresh task data for OpenAI, Claude, Gemini, and generic/local tools.</p><pre><code>memory cache-plan "answer support ticket" --provider claude
-memory cache-audit --file prompt.md --provider openai</code></pre><a href="../docs/context-compiler.md">context compiler docs</a></article>
-      <article class="card"><h3>Inference cost stack</h3><p>Shows prefill reduction, KV positions avoided, signal density, cache strategy, batching, and runtime hints.</p><pre><code>memory prefill-report "fix checkout bug"
-memory kv-budget "fix checkout bug" --max-kv-tokens 4096
-memory signal-density "fix checkout bug"</code></pre><a href="../docs/inference-bottlenecks.md">8 bottlenecks guide</a></article>
-    </section>
-
-    <section class="section-head" id="maps">
-      <p class="eyebrow">Repo time machine</p>
-      <h2>Turn local memory into maps, timelines, and explanations.</h2>
-      <p>The signature demo is simple: your repo can explain how it evolved and why things exist.</p>
-    </section>
-    <section class="grid two">
-      <article class="card pastel"><h3>Project evolution map</h3><pre><code>memory map --type evolution --output html --save .memory.cpp/demo/evolution.html
-memory map why "SQLite storage"
-memory map impact "terminal memory"</code></pre><p>Show timeline, decisions, bugs/fixes, source links, why panels, impact panels, and map stats.</p><div class="link-row"><a href="pages/memory-map.html">Map guide</a><a href="pages/repo-time-machine.html">Time machine</a><a href="../examples/project-map.html">Example HTML</a></div></article>
-      <article class="card pastel"><h3>Git, terminal, and CI memory</h3><pre><code>memory git watch --once --dry-run
-memory terminal enable
-memory ci ingest ./ci.log
-memory ci explain-failure</code></pre><p>Small practical memory for everyday development. It watches useful signals, queues candidates, and stays approval-gated.</p><div class="link-row"><a href="pages/git-memory.html">Git memory</a><a href="pages/terminal-memory.html">Terminal memory</a><a href="pages/ci-memory.html">CI memory</a></div></article>
-    </section>
-
-    <section class="section-head" id="share">
-      <p class="eyebrow">Adoption loop</p>
-      <h2>Create something useful in five minutes, then share it safely.</h2>
-      <p>Generate static Markdown or HTML for READMEs, PRs, issues, launch posts, or team chats. Nothing uploads by default.</p>
-    </section>
-    <section class="window docs-window"><div class="window-bar"><span></span><span></span><span></span><strong>shareable-artifacts</strong></div><div class="window-body"><div class="artifact-grid">
-      <article><strong>Project summary</strong><code>memory share status</code><a href="../examples/share-project-memory.md">example</a></article>
-      <article><strong>PR summary</strong><code>memory pr comment</code><a href="../examples/pr-comment.md">example</a></article>
-      <article><strong>Repo timeline</strong><code>memory timeline week</code><a href="../examples/repo-timeline.md">example</a></article>
-      <article><strong>New-dev handoff</strong><code>memory handoff new-dev</code><a href="../examples/new-dev-handoff.md">example</a></article>
-      <article><strong>Release notes</strong><code>memory share release</code><a href="../launch/changelog-v0-public.md">launch note</a></article>
-      <article><strong>Adoption checklist</strong><code>memory adoption checklist</code><a href="pages/adoption.html">guide</a></article>
-    </div></div></section>
-
-    <section class="section-head" id="docs">
-      <p class="eyebrow">One page, links to everything</p>
-      <h2>All docs, recipes, examples, and launch assets from one aligned hub.</h2>
-      <p>Use this page as the front door. Deep guides still exist for people who want details.</p>
-    </section>
-    <section class="window docs-window"><div class="window-bar"><span></span><span></span><span></span><strong>manual</strong></div><div class="window-body">
-      <div class="doc-nav">
-        <a href="pages/quickstart.html">Quickstart</a><a href="pages/install.html">Install</a><a href="pages/tour.html">5-minute tour</a><a href="pages/docs.html">Docs home</a><a href="pages/cli.html">CLI reference</a><a href="pages/dev-workflows.html">Dev workflows</a><a href="pages/integrations.html">Integrations</a><a href="pages/recipes.html">Recipes</a><a href="pages/examples.html">Examples</a><a href="pages/safety-privacy.html">Safety and privacy</a><a href="pages/architecture.html">Architecture</a><a href="pages/roadmap.html">Roadmap</a><a href="pages/changelog.html">Changelog</a><a href="pages/faq.html">FAQ</a><a href="pages/troubleshooting.html">Troubleshooting</a><a href="pages/contributing.html">Contributing</a><a href="pages/security-policy.html">Security policy</a><a href="../docs/context-compiler.md">Context compiler</a><a href="../docs/inference-bottlenecks.md">Inference bottlenecks</a><a href="../docs/providers.md">Providers</a><a href="../docs/advanced.md">Advanced</a><a href="../docs/api.md">API surface</a><a href="../docs/competitive-positioning.md">Positioning</a><a href="../docs/demo-script.md">Demo script</a><a href="../docs/share.md">Share docs</a><a href="../docs/pr-workflow.md">PR docs</a><a href="../docs/timeline.md">Timeline docs</a><a href="../docs/handoff.md">Handoff docs</a><a href="../docs/adoption.md">Adoption docs</a><a href="../docs/release-hardening.md">Release hardening</a><a href="../docs/api-stability.md">API stability</a><a href="../docs/compatibility.md">Compatibility</a><a href="../docs/limitations.md">Limitations</a><a href="../docs/performance.md">Performance</a><a href="../docs/security.md">Security notes</a><a href="../docs/dogfooding.md">Dogfooding</a><a href="../docs/release-process.md">Release process</a><a href="../docs/community.md">Community</a><a href="../docs/launch-checklist.md">Launch checklist</a><a href="../launch/demo-script.md">Launch script</a></div>
-    </div></section>
-
-    <section class="section-head" id="trust">
-      <p class="eyebrow">Safe by default</p>
-      <h2>Local-first, approval-gated, and clear about boundaries.</h2>
-      <p>memory.cpp is for everyday developer context, not cloud sync, billing, enterprise permissions, or a plugin marketplace.</p>
-    </section>
-    <section class="grid three">
-      <article class="card"><h3>Local storage</h3><p>SQLite lives under <code>.memory.cpp/</code>. Redaction and ignore rules are visible.</p><pre><code>memory where
-memory privacy status
-memory ignore list</code></pre></article>
-      <article class="card"><h3>Approval gates</h3><p>Automatic capture writes candidates first. Risky memory stays reviewable.</p><pre><code>memory inbox review
-memory inbox explain &lt;id&gt;
-memory inbox approve &lt;id&gt;</code></pre></article>
-      <article class="card"><h3>Repair path</h3><p>Doctor and release checks give exact commands instead of vague advice.</p><pre><code>memory doctor
-memory fix
-memory release-check</code></pre></article>
+    <!-- COMPILER -->
+    <section id="compiler">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="kicker">The compiler</span>
+          <h2>Repo history → a verified, cacheable context pack.</h2>
+          <p>memory.cpp sits after retrieval but before inference: compilation, cache layout, exclusion, proof, and measurement.</p>
+        </div>
+        <div class="pipe">
+          <div class="step"><b>MemoryIR</b><span>typed blocks + scores</span></div>
+          <div class="arr">→</div>
+          <div class="step"><b>Optimizer</b><span>utility / cost</span></div>
+          <div class="arr">→</div>
+          <div class="step"><b>Stable prefix + suffix</b><span>durable vs volatile</span></div>
+          <div class="arr">→</div>
+          <div class="step"><b>Cache manifest</b><span>blake3 + regions</span></div>
+          <div class="arr">→</div>
+          <div class="step"><b>Ledger + lock</b><span>reproducible</span></div>
+        </div>
+        <div class="grid g3">
+          <div class="card"><h3>MemoryIR</h3><p>A typed IR for repo facts, decisions, traces, and tests — each with source anchor, trust, freshness, sensitivity, volatility, token cost, and cache role.</p></div>
+          <div class="card"><h3>Stable prefix + fresh suffix</h3><p>Durable knowledge is separated from volatile task state. The prefix excludes task text and is blake3-hashed, so the same repo state yields the same cache key.</p></div>
+          <div class="card"><h3>Negative memory</h3><p>Stale docs, wrong fixes, generated files, and prompt-injection sources are remembered as exclusions. The model gets less harmful context — not just more.</p></div>
+          <div class="card"><h3>Freshness proofs</h3><p>Memories are tied to files, hashes, commits, tests, or human confirmation. Old or unsupported memory is rejected before it enters the prompt.</p></div>
+          <div class="card"><h3>KV-aware optimizer</h3><p>Context is scored by utility per cost — tokens and volatility, not relevance alone. Small high-signal facts beat large weakly-useful files.</p></div>
+          <div class="card"><h3>Ledger + lockfile</h3><p>Every pack records included/excluded memory, proof state, cache regions, and hashes — so agent context is reproducible and auditable.</p></div>
+        </div>
+      </div>
     </section>
 
+    <!-- BENCHMARK -->
+    <section id="benchmark">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="kicker">CAMC-Bench</span>
+          <h2>An ablation that isolates each component.</h2>
+          <p>Cache-Aware Memory Compilation, measured on a bundled synthetic corpus. Every number is produced by the real compiler code paths — nothing is hard-coded.</p>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Strategy</th><th>Tokens</th><th>Cacheable</th><th>Reduction</th><th>Stale</th><th>Contra.</th><th>Secrets</th><th>Success</th></tr></thead>
+            <tbody>
+              <tr><td>raw full context</td><td>638</td><td>0</td><td>0.0%</td><td>9</td><td>9</td><td>3</td><td>0/3</td></tr>
+              <tr><td>grep</td><td>233</td><td>0</td><td>63.5%</td><td>3</td><td>3</td><td>2</td><td>0/3</td></tr>
+              <tr><td>BM25</td><td>638</td><td>0</td><td>0.0%</td><td>9</td><td>9</td><td>3</td><td>0/3</td></tr>
+              <tr><td>embedding retrieval</td><td>638</td><td>0</td><td>0.0%</td><td>9</td><td>9</td><td>3</td><td>0/3</td></tr>
+              <tr><td>CAMC − no negative memory</td><td>521</td><td>318</td><td>18.3%</td><td>0</td><td>0</td><td>3</td><td>3/3</td></tr>
+              <tr><td>CAMC − no freshness proofs</td><td>383</td><td>186</td><td>40.0%</td><td>9</td><td>9</td><td>0</td><td>0/3</td></tr>
+              <tr><td>CAMC − no canonical prefix</td><td>266</td><td>0</td><td>58.3%</td><td>0</td><td>0</td><td>0</td><td>3/3</td></tr>
+              <tr class="win"><td>full CAMC</td><td>266</td><td>186</td><td>58.3%</td><td>0</td><td>0</td><td>0</td><td>3/3</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="bench-img"><img src="assets/camc-bench.svg" alt="CAMC-Bench: total context tokens by strategy"></div>
+        <p style="margin-top:22px"><strong>Dogfooded on this repo:</strong> seeded with real durable facts and compiled for real tasks, the pack is <strong>854 tokens vs 7,961</strong> for the naive “paste the docs” baseline — <strong>~89% smaller</strong>, with a cacheable prefix identical across tasks.</p>
+        <div class="bench-img"><img src="assets/dogfood-tokens.svg" alt="Dogfood: repo docs paste vs compiled pack"></div>
+        <p class="note" style="margin-top:18px">Synthetic corpus measures the <em>mechanism</em>, not real-world win rates. KV/latency figures elsewhere are prompt-side estimates; measured TTFT against vLLM / llama.cpp / Ollama / SGLang is reported separately via <code>scripts/runtime_bench.py</code>.</p>
+      </div>
+    </section>
 
-    <section class="section-head" id="release">
-      <p class="eyebrow">Release confidence</p>
-      <h2>Complete local surface, compatibility notes, and hardening gates.</h2>
-      <p>The public surface is documented honestly so developers know what works locally, what is opt-in, and what is intentionally not a cloud product.</p>
+    <!-- DIFFERENTIATION -->
+    <section id="different">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="kicker">Positioning</span>
+          <h2>Not a bigger memory store — a context compiler.</h2>
+          <p>Most memory systems optimize storage and retrieval. memory.cpp focuses on what happens after retrieval but before inference.</p>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>System</th><th style="text-align:left">Primary role</th><th style="text-align:left">memory.cpp difference</th></tr></thead>
+            <tbody>
+              <tr><td>Supermemory</td><td style="text-align:left">Cloud context + retrieval for agents</td><td style="text-align:left">Local-first, repo-specific, compiler-oriented: cache layout, stale exclusion, prefix stability</td></tr>
+              <tr><td>Mem0</td><td style="text-align:left">Persistent cross-session memory</td><td style="text-align:left">Repository compilation, source-anchored freshness, negative memory, KV-aware packing</td></tr>
+              <tr><td>Honcho</td><td style="text-align:left">Stateful agent/entity memory</td><td style="text-align:left">Deterministic reports, MemoryIR, cache manifests, freshness proofs, reproducible ledgers</td></tr>
+              <tr><td>Vector DB / RAG</td><td style="text-align:left">Top-k similarity retrieval</td><td style="text-align:left">A compiler that excludes, proves, and cache-optimizes the minimal sufficient context</td></tr>
+              <tr><td>Provider prompt caching</td><td style="text-align:left">Runtime prefix reuse</td><td style="text-align:left">Produces the byte-stable prefix that makes prompt caching actually hit</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
-    <section class="grid three">
-      <article class="card"><h3>Release candidate</h3><p>Run one bounded script before tagging.</p><pre><code>./scripts/release-candidate.sh
-./scripts/release-candidate.ps1</code></pre><div class="link-row"><a href="../docs/release-hardening.md">Hardening guide</a><a href="../docs/release-process.md">Release process</a></div></article>
-      <article class="card"><h3>Compatibility</h3><p>Rust, OS, editor, MCP, terminal, CI, and low-RAM support are explicit.</p><pre><code>memory release-check
-memory doctor</code></pre><div class="link-row"><a href="../docs/compatibility.md">Compatibility</a><a href="../docs/api-stability.md">API stability</a></div></article>
-      <article class="card"><h3>Known limits</h3><p>No hosted sync, no cloud account, no plugin marketplace, and no fake ONNX claims.</p><pre><code>memory privacy status
-memory embeddings explain</code></pre><div class="link-row"><a href="../docs/limitations.md">Limitations</a><a href="../docs/performance.md">Performance</a></div></article>
+
+    <!-- QUICKSTART -->
+    <section id="start">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="kicker">Quickstart</span>
+          <h2>60 seconds, fully local.</h2>
+          <p>No cloud, no accounts, no telemetry. A SQLite vault under <code>.memory.cpp/</code>.</p>
+        </div>
+        <div class="grid g2">
+          <pre><code><span class="c"># build</span>
+cargo build -p memory-cli
+
+<span class="c"># teach it durable repo knowledge</span>
+memory remember <span class="g">"Billing exports must be deterministic"</span> --tags invariant
+memory remember <span class="g">"ADR-004: use server-side sessions, not JWT"</span>
+
+<span class="c"># compile a cache-stable pack and inspect everything</span>
+memory <span class="k">compile</span> <span class="g">"fix the billing export bug"</span> --provider anthropic
+memory <span class="k">cache-manifest</span> <span class="g">"fix the billing export bug"</span> --provider anthropic
+memory <span class="k">ir</span> inspect <span class="g">"fix the billing export bug"</span></code></pre>
+          <pre><code><span class="c"># prove the cache key is task-independent</span>
+memory <span class="k">cache-hash</span> <span class="g">"fix the billing export bug"</span>
+memory <span class="k">cache-hash</span> <span class="g">"a totally unrelated task"</span>   <span class="c"># same hash!</span>
+
+<span class="c"># self-heal, govern, and bootstrap</span>
+memory <span class="k">gc</span> --apply
+memory <span class="k">contradictions</span> resolve
+memory <span class="k">ci-check</span> --require-rules        <span class="c"># PR gate</span>
+memory <span class="k">mcp</span> install --client claude     <span class="c"># one-command MCP</span>
+memory <span class="k">wow</span> --for-acquirer            <span class="c"># the whole story</span></code></pre>
+        </div>
+        <div style="margin-top:18px">
+          <span class="pill">Claude Code</span><span class="pill">Codex</span><span class="pill">Cursor</span><span class="pill">Gemini</span><span class="pill">Continue</span><span class="pill">MCP</span><span class="pill">vLLM / SGLang / llama.cpp</span>
+        </div>
+      </div>
     </section>
-    <section class="window final-cta"><div class="window-bar"><span></span><span></span><span></span><strong>try-it</strong></div><div class="window-body"><h2>Install, remember, explain, share.</h2><p>Start with dry-run install, then build the first local context pack and project summary.</p><pre><code>./scripts/install.sh --dry-run
-memory setup --developer --yes
-memory dev morning
-memory share status</code></pre><div class="actions"><a class="button primary" href="pages/install.html">Install guide</a><a class="button" href="pages/tour.html">Take the tour</a><a class="button" href="https://github.com/KirtiRamchandani/memory.cpp">GitHub</a></div></div></section>
+
+    <!-- SAFETY -->
+    <section id="safety">
+      <div class="wrap grid g3">
+        <div class="card"><div class="ico">🔒</div><h3>Local-first</h3><p>No cloud, no accounts, no telemetry, no network calls unless you explicitly enable a connector.</p></div>
+        <div class="card"><div class="ico">🧯</div><h3>Write firewall</h3><p>Candidate writes are screened for secrets, prompt-injection, and untrusted low-confidence sources — and quarantined before they are stored.</p></div>
+        <div class="card"><div class="ico">🧾</div><h3>Auditable</h3><p>Provenance ledgers and deterministic lockfiles make exactly what the model saw reproducible and reviewable.</p></div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section id="faq">
+      <div class="wrap" style="max-width:820px;margin:0 auto">
+        <div class="sec-head"><span class="kicker">FAQ</span><h2>Straight answers.</h2></div>
+        <details open><summary>Does memory.cpp compress the KV cache?</summary><p>No. It reduces KV <em>pressure</em> by keeping unnecessary, stale, duplicated, or harmful tokens out of the prompt, and by canonicalizing a stable prefix that providers can cache. All KV/latency figures are estimates unless measured against a runtime, and are reported separately.</p></details>
+        <details><summary>How is this different from RAG?</summary><p>RAG returns top-k similar chunks. memory.cpp is a compiler: it excludes stale/harmful context, proves freshness, scores by utility-per-cost, and produces a byte-stable cacheable prefix plus a fresh suffix.</p></details>
+        <details><summary>Which tools does it work with?</summary><p>Provider packs for Claude Code, Codex, Cursor, Gemini, Continue, and MCP clients, plus runtime hints for vLLM, SGLang, llama.cpp, and Ollama. <code>memory mcp install</code> wires it into Claude/Cursor/VS Code in one command.</p></details>
+        <details><summary>Is it really local-first?</summary><p>Yes — a Rust binary plus a SQLite vault under <code>.memory.cpp/</code>. No cloud, no accounts, no telemetry. MCP exposes read-only resources by default.</p></details>
+        <details><summary>Are the benchmark numbers real?</summary><p>Yes, and reproducible. CAMC-Bench runs on a bundled synthetic corpus via the production code paths (<code>memory bench camc</code>); the dogfood numbers come from <code>python scripts/benchmark.py</code>.</p></details>
+      </div>
+    </section>
   </main>
 
-  <footer>memory.cpp - Your repo remembers. Local repo memory for developers and AI coding tools.</footer>
-  <script src="app.js"></script>
+  <footer>
+    <div class="wrap foot-grid">
+      <div>
+        <a class="brand" href="#top"><span class="dot"></span>memory.cpp</a>
+        <p class="muted" style="max-width:34ch;margin:12px 0 0">Long-horizon agents need a context compiler, not just a bigger memory store.</p>
+      </div>
+      <div class="foot-links">
+        <a href="https://github.com/KirtiRamchandani/memory.cpp">GitHub</a>
+        <a href="https://github.com/KirtiRamchandani/memory.cpp/blob/main/README.md">README</a>
+        <a href="https://github.com/KirtiRamchandani/memory.cpp/blob/main/BENCHMARKS.md">Benchmarks</a>
+        <a href="https://github.com/KirtiRamchandani/memory.cpp/tree/main/docs">Docs</a>
+        <a href="https://github.com/KirtiRamchandani/memory.cpp/tree/main/docs/paper">Paper</a>
+        <a href="https://github.com/KirtiRamchandani/memory.cpp/blob/main/SECURITY.md">Security</a>
+      </div>
+    </div>
+    <div class="wrap" style="margin-top:26px;color:var(--dim);font-size:.85rem">MIT © KirtiRamchandani · memory.cpp reduces prompt-side waste and estimated KV pressure by sending fewer, fresher, more reusable tokens.</div>
+  </footer>
+
+  <script>
+    (function(){
+      var root=document.documentElement, btn=document.getElementById('themeToggle');
+      var saved=localStorage.getItem('memcpp-theme');
+      if(saved){root.setAttribute('data-theme',saved);}
+      function sync(){btn.textContent=root.getAttribute('data-theme')==='dark'?'☀︎':'☾';}
+      sync();
+      btn.addEventListener('click',function(){
+        var next=root.getAttribute('data-theme')==='dark'?'light':'dark';
+        root.setAttribute('data-theme',next);localStorage.setItem('memcpp-theme',next);sync();
+      });
+    })();
+  </script>
 </body>
 </html>

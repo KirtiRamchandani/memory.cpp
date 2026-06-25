@@ -13620,24 +13620,120 @@ fn ci_check_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
     let task = cli_flag_value(rest, "--task").unwrap_or_else(|| "repo context".to_string());
     let budget = option_usize(rest, "--budget", 1500);
     let report = build_ai_context_report(engine, &task, "generic", budget, None)?;
-    let mut failures = Vec::new();
+    let mut failures: Vec<String> = Vec::new();
+
+    // 1. No secret-like strings may compile into a pack.
     if report.secret_like_blocks > 0 {
-        failures.push("generated pack contains secret-like strings");
+        failures.push(format!(
+            "generated pack contains {} secret-like string(s)",
+            report.secret_like_blocks
+        ));
     }
+    // 2. No prompt-injection content.
+    if report.prompt_injection_warnings > 0 {
+        failures.push(format!(
+            "{} prompt-injection warning(s) in retrieved memory",
+            report.prompt_injection_warnings
+        ));
+    }
+    // 1b/2b. Vault-wide scan: no active memory may contain a secret or an
+    // injection payload, even if it was not retrieved for this task.
+    let all_active = engine.all_memories(None, false)?;
+    let vault_secrets = all_active
+        .iter()
+        .filter(|m| detect_sensitive_reason(&memory_text(m)).is_some())
+        .count();
+    let vault_injections = all_active
+        .iter()
+        .filter(|m| has_prompt_injection_warning(&memory_text(m)))
+        .count();
+    if vault_secrets > 0 {
+        failures.push(format!(
+            "{vault_secrets} active memory entr(ies) contain secret-like material"
+        ));
+    }
+    if vault_injections > 0 {
+        failures.push(format!(
+            "{vault_injections} active memory entr(ies) contain prompt-injection markers"
+        ));
+    }
+    // 3. Stale/superseded memory (opt-in strict).
     if report.stale_blocked_tokens > 0 && cli_flag(rest, "--strict-stale") {
-        failures.push("stale/superseded memory was found");
+        failures.push("stale/superseded memory was found".to_string());
     }
-    if report.compiled_tokens > budget {
-        failures.push("context exceeds budget");
+    // 4. Budget. compiled_tokens is clamped upstream, so check the real
+    // (unclamped) prompt size: stable prefix + fresh suffix.
+    let real_tokens = report
+        .cacheable_prefix_tokens
+        .saturating_add(report.fresh_suffix_tokens);
+    if real_tokens > budget {
+        failures.push(format!(
+            "context {real_tokens} tokens (prefix+suffix) exceeds budget {budget}"
+        ));
     }
-    println!("memory CI check");
-    if failures.is_empty() {
-        println!("pass");
-    } else {
-        for failure in &failures {
-            println!("- {failure}");
+    // 5. Require at least one hard rule (opt-in).
+    if cli_flag(rest, "--require-rules") {
+        let has_rule = engine.all_memories(None, false)?.iter().any(|m| {
+            m.attributes
+                .tags
+                .iter()
+                .any(|t| matches!(t.as_str(), "mistake" | "rule" | "invariant"))
+        });
+        if !has_rule {
+            failures
+                .push("no hard rules/invariants present (memory mistake/invariant)".to_string());
         }
-        return Err(anyhow!("memory ci-check failed"));
+    }
+    // 6. Contract violations against the staged diff.
+    let contracts_path = engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("contracts.json");
+    if let Ok(raw) = fs::read_to_string(&contracts_path) {
+        let store = memory_core::ContractStore::from_json(&raw);
+        if !store.contracts.is_empty() {
+            let diff = ProcessCommand::new("git")
+                .args(["diff", "--cached"])
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                .unwrap_or_default();
+            let violations = memory_core::check_contracts(&store, &diff);
+            for v in &violations {
+                failures.push(format!(
+                    "contract {} violated in {}: '{}'",
+                    v.contract_id, v.file, v.matched
+                ));
+            }
+        }
+    }
+
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "pass": failures.is_empty(),
+                "failures": failures,
+                "task": task,
+                "budget": budget,
+                "compiled_tokens": report.compiled_tokens,
+            }))?
+        );
+    } else {
+        println!("memory CI check");
+        if failures.is_empty() {
+            println!("pass: no secrets, no injection, under budget, contracts honored");
+        } else {
+            for failure in &failures {
+                println!("- FAIL: {failure}");
+            }
+        }
+    }
+    if !failures.is_empty() {
+        return Err(anyhow!(
+            "memory ci-check failed ({} issue(s))",
+            failures.len()
+        ));
     }
     Ok(())
 }

@@ -4,6 +4,7 @@ mod bench;
 mod cache_manifest;
 mod compression;
 mod config;
+mod contracts;
 mod contradictions;
 mod debt;
 mod embedding;
@@ -15,6 +16,7 @@ mod fuzz;
 mod gc;
 mod graph;
 mod import;
+mod invariants;
 mod ir;
 mod kv_model;
 mod ledger;
@@ -46,6 +48,9 @@ pub use bench::{run as run_camc_bench, BenchReport, Strategy, StrategyResult};
 pub use cache_manifest::{compiler_version, CacheManifest, CacheManifestInput, CacheRegion};
 pub use compression::{CompressionConfig, Compressor, HeuristicCompressor};
 pub use config::EngineConfig;
+pub use contracts::{
+    check_diff as check_contracts, Contract, ContractStore, ContractType, Violation,
+};
 pub use contradictions::{detect as detect_contradictions, Contradiction, MemoryView, MergePolicy};
 pub use debt::{score as debt_score, DebtFactors, DebtReport};
 pub use embedding::{Embedder, FastEmbedOnnxEmbedder, HashEmbedder, SharedEmbedder};
@@ -62,6 +67,9 @@ pub use graph::{extract_entities, Entity, EntityGraph, EntityKind, EntityLink};
 pub use import::{
     check_ignored_path, collect_importable_files, import_path, parse_file, ImportFormat,
     ImportOptions, ImportReport, DEFAULT_MEMORYIGNORE,
+};
+pub use invariants::{
+    extract as extract_invariants, extract_from as extract_invariants_from, Invariant, SourceKind,
 };
 pub use ir::{CacheRole, IrBlock, IrKind, MemoryIr, Volatility};
 pub use kv_model::{mib, KvComparison, ModelProfile};

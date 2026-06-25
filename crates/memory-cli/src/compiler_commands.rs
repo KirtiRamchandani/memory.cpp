@@ -1718,3 +1718,244 @@ pub(crate) fn merge_command(engine: &MemoryEngine, rest: &[String]) -> Result<()
     );
     Ok(())
 }
+
+/// Gather candidate invariant-source files from the repo (curated, read-only).
+fn invariant_sources(root: &Path) -> Vec<(String, String)> {
+    let mut sources = Vec::new();
+    for f in [
+        "README.md",
+        "AGENTS.md",
+        "GEMINI.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+    ] {
+        if let Ok(content) = fs::read_to_string(root.join(f)) {
+            sources.push((f.to_string(), content));
+        }
+    }
+    for dir in ["docs", "tests", "crates/memory-core/src"] {
+        if let Ok(entries) = fs::read_dir(root.join(dir)) {
+            for entry in entries.flatten().take(40) {
+                let path = entry.path();
+                let is_src = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e == "md" || e == "rs");
+                if is_src {
+                    if let Ok(content) = fs::read_to_string(&path) {
+                        let rel = path
+                            .strip_prefix(root)
+                            .unwrap_or(&path)
+                            .to_string_lossy()
+                            .replace('\\', "/");
+                        sources.push((rel, content));
+                    }
+                }
+            }
+        }
+    }
+    sources
+}
+
+/// `memory invariants extract|list|verify [--save]`.
+pub(crate) fn invariants_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let sub = rest.first().map(|s| s.as_str()).unwrap_or("extract");
+    match sub {
+        "list" => {
+            let invs: Vec<_> = engine
+                .all_memories(None, false)?
+                .into_iter()
+                .filter(|m| m.attributes.tags.iter().any(|t| t == "invariant"))
+                .collect();
+            if cli_flag(rest, "--json") {
+                let arr: Vec<Value> = invs
+                    .iter()
+                    .map(|m| json!({ "id": m.id, "text": m.summary }))
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({ "invariants": arr }))?
+                );
+            } else {
+                println!("invariants ({} stored)", invs.len());
+                for m in &invs {
+                    println!("- {} {}", m.id, m.summary);
+                }
+            }
+        }
+        "verify" => {
+            let invs: Vec<_> = engine
+                .all_memories(None, false)?
+                .into_iter()
+                .filter(|m| m.attributes.tags.iter().any(|t| t == "invariant"))
+                .collect();
+            let mut ok = 0;
+            for m in &invs {
+                let proof = prove_memory(m);
+                if proof.is_fresh() {
+                    ok += 1;
+                }
+                println!(
+                    "- {} {} [{}]",
+                    if proof.is_fresh() { "ok" } else { "!!" },
+                    m.summary,
+                    proof.verdict.as_str()
+                );
+            }
+            println!("{ok}/{} invariants verified fresh", invs.len());
+        }
+        _ => {
+            let root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+            let sources = invariant_sources(&root);
+            let invariants = memory_core::extract_invariants(&sources);
+            let save = cli_flag(rest, "--save");
+            if cli_flag(rest, "--json") {
+                let arr: Vec<Value> = invariants.iter().map(|i| i.to_json()).collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({ "invariants": arr }))?
+                );
+            } else {
+                println!(
+                    "extracted {} invariant(s) from {} sources",
+                    invariants.len(),
+                    sources.len()
+                );
+                for inv in &invariants {
+                    println!(
+                        "- [{} {:.2}] {}  (evidence: {})",
+                        inv.source_kind,
+                        inv.confidence,
+                        inv.text,
+                        inv.evidence.join(", ")
+                    );
+                }
+            }
+            if save {
+                let mut stored = 0;
+                for inv in &invariants {
+                    if engine
+                        .remember(
+                            NewMemory::new(inv.text.clone())
+                                .tag("invariant")
+                                .confidence(inv.confidence),
+                        )
+                        .is_ok()
+                    {
+                        stored += 1;
+                    }
+                }
+                println!("stored {stored} invariants as memories (tag: invariant)");
+            } else {
+                println!("re-run with --save to store these as invariant memories.");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn contracts_path(engine: &MemoryEngine) -> PathBuf {
+    engine
+        .store_path()
+        .parent()
+        .unwrap_or_else(|| Path::new(".memory.cpp"))
+        .join("contracts.json")
+}
+
+/// `memory contract add|list|check|violations`.
+pub(crate) fn contract_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let sub = rest.first().map(|s| s.as_str()).unwrap_or("list");
+    let path = contracts_path(engine);
+    let mut store = fs::read_to_string(&path)
+        .ok()
+        .map(|raw| memory_core::ContractStore::from_json(&raw))
+        .unwrap_or_default();
+
+    match sub {
+        "add" => {
+            let id = cli_flag_value(rest, "--id")
+                .unwrap_or_else(|| format!("contract-{}", store.contracts.len() + 1));
+            let rule = cli_flag_value(rest, "--rule").unwrap_or_else(|| "unnamed contract".into());
+            let ctype = memory_core::ContractType::parse(
+                &cli_flag_value(rest, "--type").unwrap_or_else(|| "style".into()),
+            );
+            let forbid: Vec<String> = cli_flag_value(rest, "--forbid")
+                .map(|v| {
+                    v.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let scope: Vec<String> = cli_flag_value(rest, "--scope")
+                .map(|v| {
+                    v.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            store.add(memory_core::Contract {
+                id: id.clone(),
+                contract_type: ctype,
+                rule,
+                forbid,
+                scope_contains: scope,
+            });
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(&path, store.to_json())?;
+            println!("added contract {id} [{}]", ctype.as_str());
+        }
+        "list" => {
+            println!("contracts ({})", store.contracts.len());
+            for c in &store.contracts {
+                println!(
+                    "- {} [{}] {}  forbid={:?} scope={:?}",
+                    c.id,
+                    c.contract_type.as_str(),
+                    c.rule,
+                    c.forbid,
+                    c.scope_contains
+                );
+            }
+        }
+        _ => {
+            let diff = if let Some(file) = cli_flag_path(rest, "--diff-file") {
+                fs::read_to_string(file)?
+            } else {
+                let args: &[&str] = if cli_flag(rest, "--cached") {
+                    &["diff", "--cached"]
+                } else {
+                    &["diff"]
+                };
+                ProcessCommand::new("git")
+                    .args(args)
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                    .unwrap_or_default()
+            };
+            let violations = memory_core::check_contracts(&store, &diff);
+            if cli_flag(rest, "--json") {
+                let arr: Vec<Value> = violations.iter().map(|v| v.to_json()).collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({ "violations": arr }))?
+                );
+            } else {
+                println!("contract check: {} violation(s)", violations.len());
+                for v in &violations {
+                    println!(
+                        "- {} in {}: '{}' violates {} ({})",
+                        v.matched, v.file, v.line, v.contract_id, v.rule
+                    );
+                }
+            }
+            if !violations.is_empty() {
+                std::process::exit(1);
+            }
+        }
+    }
+    Ok(())
+}

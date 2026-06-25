@@ -3060,6 +3060,14 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
             let engine = build_engine_from_options(&options)?;
             merge_command(&engine, &rest)?;
         }
+        "invariants" => {
+            let engine = build_engine_from_options(&options)?;
+            invariants_command(&engine, &rest)?;
+        }
+        "contract" => {
+            let engine = build_engine_from_options(&options)?;
+            contract_command(&engine, &rest)?;
+        }
         "savings" => {
             let engine = build_engine_from_options(&options)?;
             savings_command(&engine, &rest)?;
@@ -3934,6 +3942,8 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "gc",
         "contradictions",
         "merge",
+        "invariants",
+        "contract",
         "savings",
         "runtime-plan",
         "bench-context",

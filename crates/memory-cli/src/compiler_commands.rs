@@ -1545,3 +1545,176 @@ pub(crate) fn stable_prefix_cache_breakers(prefix: &str) -> Vec<String> {
     }
     warnings
 }
+
+/// `memory gc [--dry-run|--apply|--explain|--aggressive]` — mark/sweep the vault.
+pub(crate) fn gc_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let apply = cli_flag(rest, "--apply");
+    let aggressive = cli_flag(rest, "--aggressive");
+    let explain = cli_flag(rest, "--explain");
+    let memories = engine.all_memories(None, true)?;
+    let mut seen = HashSet::new();
+    let inputs: Vec<memory_core::GcInput> = memories
+        .iter()
+        .map(|m| {
+            let text = memory_text(m);
+            let key = normalized_dedupe_key(&text);
+            let is_duplicate = !key.is_empty() && !seen.insert(key);
+            memory_core::GcInput {
+                id: m.id.clone(),
+                tokens: estimate_tokens(&text),
+                is_stale: is_memory_stale_or_blocked(m),
+                is_duplicate,
+                is_dangerous: detect_sensitive_reason(&text).is_some()
+                    || has_prompt_injection_warning(&text),
+                is_invariant: m.attributes.tags.iter().any(|t| t == "invariant"),
+                is_low_signal: matches!(m.kind, MemoryKind::Note)
+                    && m.importance < 0.4
+                    && estimate_tokens(&text) < 12,
+            }
+        })
+        .collect();
+    let report = memory_core::gc_plan(&inputs, aggressive);
+
+    if apply {
+        for d in &report.decisions {
+            let status = match d.action.as_str() {
+                "archive" | "compact" | "sweep" => Some(MemoryStatus::Archived),
+                "quarantine" => Some(MemoryStatus::PendingReview),
+                _ => None,
+            };
+            if let Some(status) = status {
+                let _ = engine.edit_memory(
+                    &d.id,
+                    MemoryEdit {
+                        status: Some(status),
+                        ..MemoryEdit::default()
+                    },
+                );
+            }
+        }
+    }
+
+    if cli_flag(rest, "--json") {
+        println!("{}", serde_json::to_string_pretty(&report.to_json())?);
+        return Ok(());
+    }
+    println!("context GC ({})", if apply { "applied" } else { "dry-run" });
+    println!(
+        "Active memory: {} tokens -> {} tokens ({:.1}% smaller)",
+        report.active_tokens_before,
+        report.active_tokens_after,
+        report.prefix_reduction_percent()
+    );
+    println!(
+        "Pinned: {}  Archived: {}  Compacted: {}  Quarantined: {}  Swept: {}",
+        report.pinned, report.archived, report.compacted, report.quarantined, report.swept
+    );
+    if explain {
+        for d in report.decisions.iter().filter(|d| d.action != "keep") {
+            println!("  {} {} ({}, ~{}t)", d.action, d.id, d.reason, d.tokens);
+        }
+    }
+    if !apply {
+        println!("re-run with --apply to archive/quarantine, --aggressive to sweep low-signal.");
+    }
+    Ok(())
+}
+
+fn contradiction_views(engine: &MemoryEngine) -> Result<Vec<memory_core::MemoryView>> {
+    Ok(engine
+        .all_memories(None, false)?
+        .iter()
+        .map(|m| memory_core::MemoryView {
+            id: m.id.clone(),
+            text: memory_text(m),
+            created_at: m.created_at,
+            human_confirmed: m.attributes.human_confirmed,
+            has_source: m.attributes.source.is_some(),
+            test_backed: m.attributes.tags.iter().any(|t| t == "test"),
+        })
+        .collect())
+}
+
+/// `memory contradictions scan|explain|resolve [--prefer-human-confirmed]`.
+pub(crate) fn contradictions_v2_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let sub = rest.first().map(|s| s.as_str()).unwrap_or("scan");
+    let policy = if cli_flag(rest, "--prefer-human-confirmed") {
+        memory_core::MergePolicy::PreferHumanConfirmed
+    } else {
+        memory_core::MergePolicy::PreferNewer
+    };
+    let views = contradiction_views(engine)?;
+    let found = memory_core::detect_contradictions(&views, policy);
+
+    if sub == "resolve" {
+        let mut resolved = 0;
+        for c in &found {
+            engine.edit_memory(
+                &c.loser_id,
+                MemoryEdit {
+                    status: Some(MemoryStatus::Superseded),
+                    ..MemoryEdit::default()
+                },
+            )?;
+            resolved += 1;
+        }
+        println!("resolved {resolved} contradiction(s); losers marked superseded.");
+        return Ok(());
+    }
+
+    if cli_flag(rest, "--json") {
+        let arr: Vec<Value> = found.iter().map(|c| c.to_json()).collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({ "contradictions": arr }))?
+        );
+        return Ok(());
+    }
+    println!("contradictions: {} found", found.len());
+    for c in &found {
+        println!("- [{}] {} vs {}", c.topic, c.a_id, c.b_id);
+        if sub == "explain" {
+            println!("    A: {}", c.a_text);
+            println!("    B: {}", c.b_text);
+        }
+        println!("    {}", c.reason);
+    }
+    if found.is_empty() {
+        println!("  no contradictions detected");
+    } else {
+        println!("run 'memory contradictions resolve' to supersede the losing side.");
+    }
+    Ok(())
+}
+
+/// `memory merge --prefer-newer|--prefer-human-confirmed` — resolve all
+/// contradictions under a policy.
+pub(crate) fn merge_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let policy = if cli_flag(rest, "--prefer-human-confirmed") {
+        memory_core::MergePolicy::PreferHumanConfirmed
+    } else {
+        memory_core::MergePolicy::PreferNewer
+    };
+    let views = contradiction_views(engine)?;
+    let found = memory_core::detect_contradictions(&views, policy);
+    let mut merged = 0;
+    for c in &found {
+        engine.edit_memory(
+            &c.loser_id,
+            MemoryEdit {
+                status: Some(MemoryStatus::Superseded),
+                ..MemoryEdit::default()
+            },
+        )?;
+        merged += 1;
+    }
+    println!(
+        "merged {merged} contradiction(s) using {}.",
+        if policy == memory_core::MergePolicy::PreferHumanConfirmed {
+            "prefer-human-confirmed"
+        } else {
+            "prefer-newer"
+        }
+    );
+    Ok(())
+}

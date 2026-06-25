@@ -4,6 +4,7 @@ mod bench;
 mod cache_manifest;
 mod compression;
 mod config;
+mod contradictions;
 mod debt;
 mod embedding;
 mod engine;
@@ -11,6 +12,7 @@ mod error;
 mod eval;
 mod freshness;
 mod fuzz;
+mod gc;
 mod graph;
 mod import;
 mod ir;
@@ -44,6 +46,7 @@ pub use bench::{run as run_camc_bench, BenchReport, Strategy, StrategyResult};
 pub use cache_manifest::{compiler_version, CacheManifest, CacheManifestInput, CacheRegion};
 pub use compression::{CompressionConfig, Compressor, HeuristicCompressor};
 pub use config::EngineConfig;
+pub use contradictions::{detect as detect_contradictions, Contradiction, MemoryView, MergePolicy};
 pub use debt::{score as debt_score, DebtFactors, DebtReport};
 pub use embedding::{Embedder, FastEmbedOnnxEmbedder, HashEmbedder, SharedEmbedder};
 pub use engine::MemoryEngine;
@@ -54,6 +57,7 @@ pub use freshness::{
     ProofStatus,
 };
 pub use fuzz::{fuzz, FuzzBlock, FuzzReport, MutationOutcome};
+pub use gc::{plan as gc_plan, GcAction, GcDecision, GcInput, GcReport};
 pub use graph::{extract_entities, Entity, EntityGraph, EntityKind, EntityLink};
 pub use import::{
     check_ignored_path, collect_importable_files, import_path, parse_file, ImportFormat,

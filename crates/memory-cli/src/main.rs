@@ -3048,6 +3048,18 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
             let engine = build_engine_from_options(&options)?;
             resolve_memory_command(&engine, &rest)?;
         }
+        "gc" => {
+            let engine = build_engine_from_options(&options)?;
+            gc_command(&engine, &rest)?;
+        }
+        "contradictions" => {
+            let engine = build_engine_from_options(&options)?;
+            contradictions_v2_command(&engine, &rest)?;
+        }
+        "merge" => {
+            let engine = build_engine_from_options(&options)?;
+            merge_command(&engine, &rest)?;
+        }
         "savings" => {
             let engine = build_engine_from_options(&options)?;
             savings_command(&engine, &rest)?;
@@ -3919,6 +3931,9 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "conflicts",
         "stale",
         "resolve",
+        "gc",
+        "contradictions",
+        "merge",
         "savings",
         "runtime-plan",
         "bench-context",

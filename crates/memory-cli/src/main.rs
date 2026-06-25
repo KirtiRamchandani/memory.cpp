@@ -2736,6 +2736,11 @@ fn print_extended_help() -> Result<()> {
     println!("  autopsy <task> [--missing a,b]  Explain likely context-side failure causes");
     println!("  fuzz-context <task>             Stress-test a pack; robustness + essential blocks");
     println!("  poison | write-firewall         Simulate memory-poisoning; screen risky writes");
+    println!(
+        "  gc [--apply] | contradictions | merge   Self-heal: archive stale, resolve conflicts"
+    );
+    println!("  invariants extract | contract check     Extract durable rules; gate diffs");
+    println!("  autolearn | mcp install --client claude  Bootstrap a repo; one-command MCP setup");
     println!("  runtime-plan <task> --runtime generic|llama.cpp|ollama|vllm|sglang");
     println!("  savings | roi | leaderboard     Approximate token/cost/reuse summaries");
     println!();
@@ -3063,6 +3068,10 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
         "invariants" => {
             let engine = build_engine_from_options(&options)?;
             invariants_command(&engine, &rest)?;
+        }
+        "autolearn" => {
+            let engine = build_engine_from_options(&options)?;
+            autolearn_command(&engine, &rest)?;
         }
         "contract" => {
             let engine = build_engine_from_options(&options)?;
@@ -3832,6 +3841,9 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
             let engine = build_engine_from_options(&options)?;
             audit_log_command(&engine, args.limit, args.path.as_deref(), args.json)?;
         }
+        "mcp" if rest.first().map(|s| s.as_str()) == Some("install") => {
+            mcp_install_command(&rest[1..])?;
+        }
         "mcp" => {
             let args = ManualMcpCli::parse_from(
                 std::iter::once(command.clone()).chain(rest.iter().cloned()),
@@ -3944,6 +3956,7 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "merge",
         "invariants",
         "contract",
+        "autolearn",
         "savings",
         "runtime-plan",
         "bench-context",

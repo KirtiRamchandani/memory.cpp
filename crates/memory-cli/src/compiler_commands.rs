@@ -1959,3 +1959,105 @@ pub(crate) fn contract_command(engine: &MemoryEngine, rest: &[String]) -> Result
     }
     Ok(())
 }
+
+/// Path to the `memory` executable for MCP client configs.
+fn memory_exe() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "memory".to_string())
+}
+
+/// Merge a memory-cpp MCP server entry into an existing client config file.
+fn write_mcp_config(path: &Path, exe: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut root: Value = fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_else(|| json!({}));
+    if !root.is_object() {
+        root = json!({});
+    }
+    let obj = root.as_object_mut().unwrap();
+    let servers = obj.entry("mcpServers").or_insert_with(|| json!({}));
+    if let Some(servers) = servers.as_object_mut() {
+        servers.insert(
+            "memory-cpp".to_string(),
+            json!({
+                "command": exe,
+                "args": ["mcp", "start"],
+            }),
+        );
+    }
+    fs::write(path, serde_json::to_string_pretty(&root)?)?;
+    Ok(())
+}
+
+/// `memory mcp install [--client claude|cursor|vscode|all]` — write a read-only
+/// MCP server entry so Claude Code / Cursor / VS Code can consume packs with no
+/// manual wiring.
+pub(crate) fn mcp_install_command(rest: &[String]) -> Result<()> {
+    let root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let exe = memory_exe();
+    let client = cli_flag_value(rest, "--client").unwrap_or_else(|| "all".to_string());
+    let targets: Vec<(&str, std::path::PathBuf)> = match client.as_str() {
+        "claude" => vec![("Claude Code", root.join(".mcp.json"))],
+        "cursor" => vec![("Cursor", root.join(".cursor").join("mcp.json"))],
+        "vscode" => vec![("VS Code", root.join(".vscode").join("mcp.json"))],
+        _ => vec![
+            ("Claude Code", root.join(".mcp.json")),
+            ("Cursor", root.join(".cursor").join("mcp.json")),
+            ("VS Code", root.join(".vscode").join("mcp.json")),
+        ],
+    };
+    println!("installing read-only memory.cpp MCP server (command: {exe} mcp start)");
+    for (label, path) in &targets {
+        write_mcp_config(path, &exe)?;
+        println!("  {label}: {}", path.display());
+    }
+    println!("done. The server exposes read-only resources by default; restart the client to pick it up.");
+    Ok(())
+}
+
+/// `memory autolearn [--save]` — point at any repo and produce a real pack:
+/// extract invariants from docs/tests/ADRs and store them, then compile.
+pub(crate) fn autolearn_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let root = resolve_repo_root(&env::current_dir()?).unwrap_or(env::current_dir()?);
+    let sources = invariant_sources(&root);
+    let invariants = memory_core::extract_invariants(&sources);
+    let no_save = cli_flag(rest, "--dry-run");
+
+    println!(
+        "autolearn: scanned {} sources, found {} invariants",
+        sources.len(),
+        invariants.len()
+    );
+    let mut stored = 0;
+    if !no_save {
+        for inv in invariants.iter().filter(|i| i.confidence >= 0.7) {
+            if engine
+                .remember(
+                    NewMemory::new(inv.text.clone())
+                        .tag("invariant")
+                        .confidence(inv.confidence),
+                )
+                .is_ok()
+            {
+                stored += 1;
+            }
+        }
+        println!("stored {stored} high-confidence invariants (tag: invariant)");
+    } else {
+        println!(
+            "--dry-run: not storing. {} invariants are >=0.7 confidence.",
+            invariants.iter().filter(|i| i.confidence >= 0.7).count()
+        );
+    }
+    println!();
+    println!("next: memory compile \"<your task>\" --provider anthropic");
+    println!("      memory wow --for-acquirer");
+    println!("      memory mcp install --client claude");
+    Ok(())
+}

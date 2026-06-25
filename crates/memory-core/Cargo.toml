@@ -13,6 +13,8 @@ categories.workspace = true
 [features]
 default = ["http"]
 http = ["dep:ureq"]
+# Opt-in real BPE tokenizer for *measured* (not estimated) token counts.
+measured-tokens = ["dep:tiktoken-rs"]
 
 [dependencies]
 blake3.workspace = true
@@ -21,6 +23,7 @@ rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tiktoken-rs = { version = "0.6", optional = true }
 ureq = { workspace = true, optional = true }
 uuid.workspace = true
 

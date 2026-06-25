@@ -537,18 +537,22 @@ pub(crate) fn tokens_command(engine: &MemoryEngine, rest: &[String]) -> Result<(
     } else {
         println!("token count for: {task}  (provider: {provider})");
         println!(
-            "compiled prompt: ~{} tokens (estimate, {})",
+            "compiled prompt: {} {} tokens ({})",
+            if compiled.measured { "" } else { "~" },
             compiled.tokens,
             if compiled.measured {
-                "measured"
+                "measured, BPE"
             } else {
-                "approx"
+                "estimate"
             }
         );
         println!("  stable prefix: ~{} tokens", stable.tokens);
         println!("  fresh suffix:  ~{} tokens", fresh.tokens);
         println!("generic estimate: ~{} tokens", generic.tokens);
-        println!("note: counts are estimates unless a provider tokenizer is enabled.");
+        println!("note: counts are estimates by default. Build with");
+        println!(
+            "      `cargo build -p memory-cli --features measured-tokens` for real BPE counts."
+        );
     }
     Ok(())
 }

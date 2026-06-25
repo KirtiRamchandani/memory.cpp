@@ -95,9 +95,42 @@ impl Tokenizer {
         }
     }
 
-    /// Count tokens. Blends a character-rate estimate with a word-count floor,
-    /// because both pure-char and pure-word estimates are wrong on code.
+    /// Count tokens. With the `measured-tokens` feature this uses a real BPE
+    /// tokenizer (measured); otherwise it uses the estimator (labeled estimate).
     pub fn count(&self, text: &str) -> TokenCount {
+        #[cfg(feature = "measured-tokens")]
+        {
+            if let Some(tc) = self.count_measured(text) {
+                return tc;
+            }
+        }
+        self.count_estimate(text)
+    }
+
+    /// The real-BPE path, only compiled with the `measured-tokens` feature.
+    #[cfg(feature = "measured-tokens")]
+    fn count_measured(&self, text: &str) -> Option<TokenCount> {
+        let provider = match self {
+            Tokenizer::Generic => Provider::Generic,
+            Tokenizer::Provider(p) => *p,
+        };
+        // o200k_base for the newest OpenAI models; cl100k_base otherwise (a
+        // close, widely-used reference for English-text token counts).
+        let bpe = match provider {
+            Provider::OpenAi => tiktoken_rs::o200k_base(),
+            _ => tiktoken_rs::cl100k_base(),
+        }
+        .ok()?;
+        let tokens = bpe.encode_with_special_tokens(text).len();
+        Some(TokenCount {
+            tokens,
+            mode: TokenizerMode::Measured,
+            measured: true,
+        })
+    }
+
+    /// The dependency-free estimator path (default).
+    fn count_estimate(&self, text: &str) -> TokenCount {
         let chars = text.chars().count();
         if chars == 0 {
             return TokenCount {
@@ -156,6 +189,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "measured-tokens"))]
     fn provider_tokenizers_are_estimates() {
         let c = Tokenizer::for_provider("anthropic").count("some repo context here");
         assert!(!c.measured);
@@ -163,8 +197,20 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "measured-tokens")]
+    fn provider_tokenizers_are_measured_with_feature() {
+        let c = Tokenizer::for_provider("anthropic").count("some repo context here");
+        assert!(c.measured);
+        assert_eq!(c.mode, TokenizerMode::Measured);
+    }
+
+    #[test]
     fn generic_provider_falls_back_to_generic_mode() {
         let c = Tokenizer::for_provider("something-unknown").count("text");
+        // Without the measured feature this is a generic approximation; with it,
+        // it is a measured count. Either way it is non-empty for non-empty text.
+        assert!(c.tokens > 0);
+        #[cfg(not(feature = "measured-tokens"))]
         assert_eq!(c.mode, TokenizerMode::GenericApproximation);
     }
 
@@ -173,6 +219,7 @@ mod tests {
         let json = Tokenizer::for_provider("openai")
             .count("abcd efgh")
             .to_json();
-        assert_eq!(json["measured"], false);
+        let expect_measured = cfg!(feature = "measured-tokens");
+        assert_eq!(json["measured"], expect_measured);
     }
 }

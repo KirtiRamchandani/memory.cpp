@@ -12,6 +12,11 @@ description = "Command-line interface for memory.cpp."
 name = "memory"
 path = "src/main.rs"
 
+[features]
+default = []
+# Build with real BPE token counts: `cargo build -p memory-cli --features measured-tokens`.
+measured-tokens = ["memory-core/measured-tokens"]
+
 [dependencies]
 anyhow.workspace = true
 blake3.workspace = true

@@ -19,6 +19,10 @@ context blocked, and a reproducible record of exactly what was sent.
 
 [Quick start](#60-second-quickstart) · [Why](#the-problem) · [Compiler](#the-compiler) · [Benchmark](#camc-bench) · [CLI](docs/cli.md) · [Paper](docs/paper/) · [Positioning](docs/competitive-positioning.md)
 
+<img src="assets/memorycpp-demo.gif" alt="memory.cpp demo — real command output" width="860" />
+
+<sub>Real terminal output (`scripts/render_demo.py` re-records it). Note the two `cache-hash` calls for different tasks return the <strong>same</strong> blake3 prefix hash.</sub>
+
 </div>
 
 ---
@@ -138,6 +142,17 @@ a cacheable prefix, blocks every unsafe block, and preserves task success.
 
 > Synthetic corpus — it measures the *mechanism*, not real-world win rates. Real-repo
 > and runtime numbers must come from live measurement. Reproduce: `memory bench camc`.
+
+### Dogfooded on this repo
+
+Seeded with real durable facts about memory.cpp and compiled for real tasks, the
+compiled pack is **854 tokens vs 7,961** for the naive "paste the docs" baseline
+(`README.md` + `docs/architecture.md` + `docs/cli.md` + `docs/cache-aware-compiler.md`)
+— **~89% smaller**, with a byte-stable cacheable prefix that is *identical across
+tasks*. Full numbers, charts, and the reproduce command: **[BENCHMARKS.md](BENCHMARKS.md)**.
+
+For **measured** (not estimated) TTFT and prefix-cache benefit against vLLM / llama.cpp /
+Ollama / SGLang, run [`scripts/runtime_bench.py`](scripts/runtime_bench.md).
 
 ---
 

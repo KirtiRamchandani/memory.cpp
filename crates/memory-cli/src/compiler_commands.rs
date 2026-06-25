@@ -2061,3 +2061,171 @@ pub(crate) fn autolearn_command(engine: &MemoryEngine, rest: &[String]) -> Resul
     println!("      memory mcp install --client claude");
     Ok(())
 }
+
+/// Role keywords used to bias an agent-specific suffix.
+fn agent_role_keywords(agent: &str) -> &'static [&'static str] {
+    match agent.trim().to_ascii_lowercase().as_str() {
+        "planner" => &[
+            "architecture",
+            "decision",
+            "roadmap",
+            "design",
+            "adr",
+            "plan",
+        ],
+        "coder" => &[
+            "file",
+            "api",
+            "function",
+            "implement",
+            "fix",
+            "test",
+            "module",
+        ],
+        "reviewer" => &[
+            "risk",
+            "invariant",
+            "bug",
+            "review",
+            "regression",
+            "contract",
+        ],
+        "security" => &[
+            "auth",
+            "secret",
+            "security",
+            "vulnerab",
+            "unsafe",
+            "injection",
+            "token",
+        ],
+        _ => &[],
+    }
+}
+
+/// Build a small, role-biased suffix from retrieved memory for one agent.
+fn agent_suffix(
+    candidates: &[memory_core::RetrievedMemory],
+    agent: &str,
+    limit: usize,
+) -> (String, usize) {
+    let keywords = agent_role_keywords(agent);
+    let mut lines: Vec<String> = candidates
+        .iter()
+        .filter(|c| {
+            let text = c.memory.summary.to_ascii_lowercase();
+            keywords.is_empty() || keywords.iter().any(|k| text.contains(k))
+        })
+        .take(limit)
+        .map(|c| format!("- {}", c.memory.summary.trim()))
+        .collect();
+    if lines.is_empty() {
+        lines.push("- (no role-specific memory; rely on the shared prefix)".to_string());
+    }
+    let body = format!("# {agent} suffix\n{}\n", lines.join("\n"));
+    let tokens = estimate_tokens(&body);
+    (body, tokens)
+}
+
+/// `memory multi-agent-plan "<task>" --agents planner,coder,reviewer` — one
+/// shared stable prefix plus small per-agent suffixes, with a cache report.
+pub(crate) fn multi_agent_plan_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let task = task_from_rest(rest, "current task");
+    let agents: Vec<String> = cli_flag_value(rest, "--agents")
+        .map(|v| {
+            v.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_else(|| vec!["planner".into(), "coder".into(), "reviewer".into()]);
+    let workspace = current_workspace_name(engine)?.unwrap_or_else(|| "default".to_string());
+
+    let shared_prefix = durable_stable_prefix(engine, &workspace)?;
+    let shared_tokens = estimate_tokens(&shared_prefix);
+    let candidates = retrieve_candidates(engine, &task)?;
+
+    let mut per_agent = Vec::new();
+    let mut suffix_total = 0usize;
+    for agent in &agents {
+        let (_, tokens) = agent_suffix(&candidates, agent, 6);
+        suffix_total += tokens;
+        per_agent.push((agent.clone(), tokens));
+    }
+
+    // The shared prefix is sent once and reused; each extra agent avoids
+    // re-sending it.
+    let repeated_avoided = shared_tokens.saturating_mul(agents.len().saturating_sub(1));
+    let naive_total = (shared_tokens + suffix_total / agents.len().max(1)) * agents.len();
+    let shared_total = shared_tokens + suffix_total;
+    let cache_hit = if naive_total == 0 {
+        0.0
+    } else {
+        (repeated_avoided as f32 / naive_total as f32) * 100.0
+    };
+
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "task": task,
+                "shared_prefix_tokens": shared_tokens,
+                "stable_prefix_hash": memory_core::stable_prefix_hash(&shared_prefix),
+                "agents": per_agent.iter().map(|(a, t)| json!({ "agent": a, "suffix_tokens": t })).collect::<Vec<_>>(),
+                "repeated_tokens_avoided": repeated_avoided,
+                "naive_total_tokens": naive_total,
+                "shared_total_tokens": shared_total,
+                "cache_hit_estimate_percent": format!("{cache_hit:.1}"),
+            }))?
+        );
+        return Ok(());
+    }
+    println!("multi-agent plan: {task}");
+    println!("shared stable prefix: {shared_tokens} tokens (sent once, reused by all agents)");
+    println!(
+        "stable prefix hash: {}",
+        memory_core::stable_prefix_hash(&shared_prefix)
+    );
+    for (agent, tokens) in &per_agent {
+        println!("  {agent:<10} suffix: {tokens} tokens");
+    }
+    println!(
+        "repeated tokens avoided: {repeated_avoided} ({} agents share one prefix)",
+        agents.len()
+    );
+    println!(
+        "naive (prefix per agent): {naive_total} tokens -> shared: {shared_total} tokens (~{cache_hit:.1}% saved)"
+    );
+    Ok(())
+}
+
+/// `memory view --agent planner|coder|reviewer|security "<task>"` — an
+/// agent-specific context view (shared prefix + role suffix).
+pub(crate) fn view_command(engine: &MemoryEngine, rest: &[String]) -> Result<()> {
+    let agent = cli_flag_value(rest, "--agent").unwrap_or_else(|| "coder".to_string());
+    let task = task_from_rest(rest, "current task");
+    let workspace = current_workspace_name(engine)?.unwrap_or_else(|| "default".to_string());
+    let shared_prefix = durable_stable_prefix(engine, &workspace)?;
+    let candidates = retrieve_candidates(engine, &task)?;
+    let (suffix, suffix_tokens) = agent_suffix(&candidates, &agent, 10);
+
+    if cli_flag(rest, "--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "agent": agent,
+                "task": task,
+                "shared_prefix_tokens": estimate_tokens(&shared_prefix),
+                "suffix_tokens": suffix_tokens,
+                "stable_prefix": shared_prefix,
+                "fresh_suffix": suffix,
+            }))?
+        );
+        return Ok(());
+    }
+    println!("# memory.cpp view for agent: {agent}");
+    println!("# task: {task}\n");
+    println!("{shared_prefix}");
+    println!("{suffix}");
+    Ok(())
+}

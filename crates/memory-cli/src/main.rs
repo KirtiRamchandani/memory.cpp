@@ -3073,6 +3073,14 @@ fn try_handle_manual_command(raw_args: &[String]) -> Result<bool> {
             let engine = build_engine_from_options(&options)?;
             autolearn_command(&engine, &rest)?;
         }
+        "multi-agent-plan" => {
+            let engine = build_engine_from_options(&options)?;
+            multi_agent_plan_command(&engine, &rest)?;
+        }
+        "view" => {
+            let engine = build_engine_from_options(&options)?;
+            view_command(&engine, &rest)?;
+        }
         "contract" => {
             let engine = build_engine_from_options(&options)?;
             contract_command(&engine, &rest)?;
@@ -3957,6 +3965,8 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
         "invariants",
         "contract",
         "autolearn",
+        "multi-agent-plan",
+        "view",
         "savings",
         "runtime-plan",
         "bench-context",

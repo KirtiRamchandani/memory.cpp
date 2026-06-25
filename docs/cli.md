@@ -389,3 +389,19 @@ bench camc | bench report --html                     CAMC-Bench: compare strateg
 paper run|tables|export|figures|appendix             Paper-ready CAMC-Bench artifacts
 wow --for-acquirer                                   One-command acquisition report
 ```
+
+## Lifecycle, governance, and distribution (v2)
+
+```text
+gc [--dry-run|--apply|--explain|--aggressive]   Archive stale, compact dupes, quarantine dangerous, pin invariants
+contradictions scan|explain|resolve             Detect & resolve opposing claims (npm vs pnpm, JWT vs sessions, ...)
+merge --prefer-newer|--prefer-human-confirmed    Resolve all contradictions under a policy
+invariants extract [--save] | list | verify      Extract durable rules from docs/tests/ADRs with evidence
+contract add|list|check|violations               Enforceable contracts checked against a git diff (gates CI)
+ci-check [--require-rules] [--strict-stale]       Fail CI on secrets/injection/stale/over-budget/contract violations
+autolearn [--dry-run]                            Bootstrap any repo: extract + store invariants, then compile
+mcp install --client claude|cursor|vscode|all    Write a read-only MCP server entry for the client
+multi-agent-plan <task> --agents planner,coder,reviewer   Shared stable prefix + per-agent suffixes + cache report
+view --agent planner|coder|reviewer|security <task>       Agent-specific context view
+tokens <task> --provider openai                  Estimated counts; build with --features measured-tokens for BPE
+```

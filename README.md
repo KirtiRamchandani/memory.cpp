@@ -164,6 +164,9 @@ Ollama / SGLang, run [`scripts/runtime_bench.py`](scripts/runtime_bench.md).
 | **Freshness & safety** | `prove` · `audit-stale` · `negative add/list/explain` · `explain-exclusions` · `write-firewall` · `poison` |
 | **Cost & cache** | `tokens --provider …` · `kv-sim --model llama-3.1-8b` · `cache-plan` · `kv-report` |
 | **Reproducibility** | `lock` · `lock diff` · `reproduce` · `ledger latest/show/export` · `verify-pack` |
+| **Self-healing** | `gc --apply` · `contradictions scan/resolve` · `merge --prefer-newer` |
+| **Governance** | `invariants extract` · `contract add/check` · `ci-check --require-rules` (PR gate) |
+| **Distribution** | `autolearn` · `mcp install --client claude` · `multi-agent-plan` · `view --agent security` |
 | **Research** | `minimize --must-include …` · `autopsy` · `fuzz-context` · `debt` · `bench camc` · `paper run` |
 | **Memory vault** | `remember` · `recall` · `ask` · `inbox review` · `entity` · `session` · `insight` |
 | **Provider packs** | `pack --for claude\|codex\|gemini\|cursor\|continue\|mcp` · `attach` · `agents-score` |

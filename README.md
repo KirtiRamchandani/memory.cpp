@@ -186,6 +186,7 @@ exclusion, proof, and measurement.
 | Supermemory | Broad cloud context + retrieval for agents | Local-first, repo-specific, compiler-oriented: cache layout, stale exclusion, prefix stability, measurement |
 | Mem0 | Persistent cross-session/agent memory | Repository context *compilation*, source-anchored freshness, negative memory, KV-aware packing |
 | Honcho | Stateful agent/entity memory | Deterministic local reports, MemoryIR, cache manifests, freshness proofs, reproducible ledgers |
+| [ClickHouse Loom](https://github.com/ClickHouse/loom) | Self-hosted shared agent memory and code search. [Shared memory](https://github.com/ClickHouse/loom/blob/v1.3.0/docs/use-cases/agent-memory.md) · [Code index](https://github.com/ClickHouse/loom/blob/v1.3.0/docs/features/code-index/overview.md) | A repo-local context compiler that produces cache manifests and verifies which source-backed context remains current. |
 | Vector DB / RAG | Top-k similarity retrieval | Not top-k: a compiler that excludes, proves, and cache-optimizes the minimal sufficient context |
 | Provider prompt caching | Runtime prefix reuse | memory.cpp *produces* the byte-stable prefix that makes prompt caching actually hit |
 

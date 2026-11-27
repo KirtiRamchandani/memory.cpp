@@ -16,12 +16,12 @@ use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
 use memory_core::{
-    check_ignored_path, collect_importable_files, evaluate, import_path, parse_file, Embedder,
-    EvalCase, FastEmbedOnnxEmbedder, FreshnessProof, HashEmbedder, ImportFormat, ImportOptions,
-    MapOutputFormat, MapRequest, MapType, MemoryEdit, MemoryEngine, MemoryKind, MemoryLayer,
-    MemoryPermission, MemorySource, MemoryStatus, NewMemory, OllamaEmbedder,
-    OpenAiCompatibleEmbedder, PersonaProfile, PolicyMode, RecallQuery, SharedEmbedder,
-    DEFAULT_MEMORYIGNORE,
+    check_ignored_path, collect_importable_files, evaluate, import_path, parse_file,
+    AimlapiEmbedder, Embedder, EvalCase, FastEmbedOnnxEmbedder, FreshnessProof, HashEmbedder,
+    ImportFormat, ImportOptions, MapOutputFormat, MapRequest, MapType, MemoryEdit, MemoryEngine,
+    MemoryKind, MemoryLayer, MemoryPermission, MemorySource, MemoryStatus, NewMemory,
+    OllamaEmbedder, OpenAiCompatibleEmbedder, PersonaProfile, PolicyMode, RecallQuery,
+    SharedEmbedder, AIMLAPI_DEFAULT_MODEL, DEFAULT_MEMORYIGNORE,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -58,6 +58,7 @@ enum EmbedderChoice {
     Hash,
     Ollama,
     Openai,
+    Aimlapi,
     Fastembed,
     Onnx,
 }
@@ -68,6 +69,7 @@ impl EmbedderChoice {
             Self::Hash => "hash",
             Self::Ollama => "ollama",
             Self::Openai => "openai",
+            Self::Aimlapi => "aimlapi",
             Self::Fastembed | Self::Onnx => "fastembed",
         }
     }
@@ -4115,6 +4117,7 @@ fn split_manual_args(raw_args: &[String]) -> Result<Option<(EngineOptions, Strin
                     "hash" => EmbedderChoice::Hash,
                     "ollama" => EmbedderChoice::Ollama,
                     "openai" => EmbedderChoice::Openai,
+                    "aimlapi" => EmbedderChoice::Aimlapi,
                     "fastembed" => EmbedderChoice::Fastembed,
                     "onnx" | "fastembed-onnx" => EmbedderChoice::Onnx,
                     other => return Err(anyhow!("unknown embedder: {other}")),
@@ -5969,6 +5972,11 @@ fn embedding_provider_registry() -> Value {
             "name": "openai",
             "status": "http",
             "description": "OpenAI-compatible embedding API using MEMORY_CPP_OPENAI_API_KEY by default"
+        },
+        {
+            "name": "aimlapi",
+            "status": "http",
+            "description": "AI/ML API embeddings (api.aimlapi.com, opt-in) using AIMLAPI_API_KEY; default model openai/text-embedding-3-small"
         }
     ])
 }
@@ -18614,6 +18622,7 @@ fn build_global_args(options: &EngineOptions) -> Vec<String> {
             EmbedderChoice::Hash => "hash",
             EmbedderChoice::Ollama => "ollama",
             EmbedderChoice::Openai => "openai",
+            EmbedderChoice::Aimlapi => "aimlapi",
             EmbedderChoice::Fastembed => "fastembed",
             EmbedderChoice::Onnx => "onnx",
         }
@@ -19520,6 +19529,11 @@ fn build_engine_from_options(options: &EngineOptions) -> Result<MemoryEngine> {
             effective_model.unwrap_or_else(|| "nomic-embed-text".to_string()),
             effective_dimensions,
         )),
+        EmbedderChoice::Aimlapi => Arc::new(AimlapiEmbedder::new(
+            env::var("AIMLAPI_API_KEY").ok(),
+            effective_model.unwrap_or_else(|| AIMLAPI_DEFAULT_MODEL.to_string()),
+            effective_dimensions,
+        )),
         EmbedderChoice::Openai => {
             let api_key = env::var(&options.api_key_env).ok();
             Arc::new(OpenAiCompatibleEmbedder::new(
@@ -19539,6 +19553,7 @@ fn parse_embedder_choice(value: &str) -> Option<EmbedderChoice> {
         "hash" => Some(EmbedderChoice::Hash),
         "ollama" => Some(EmbedderChoice::Ollama),
         "openai" | "openai-compatible" => Some(EmbedderChoice::Openai),
+        "aimlapi" => Some(EmbedderChoice::Aimlapi),
         "fastembed" => Some(EmbedderChoice::Fastembed),
         "onnx" | "fastembed-onnx" => Some(EmbedderChoice::Onnx),
         _ => None,
@@ -20612,6 +20627,20 @@ fn xml_escape(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aimlapi_embedder_is_opt_in_and_registered() {
+        assert!(matches!(
+            parse_embedder_choice("aimlapi"),
+            Some(EmbedderChoice::Aimlapi)
+        ));
+        assert_eq!(EmbedderChoice::Aimlapi.provider_name(), "aimlapi");
+        assert!(embedding_provider_registry()
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["name"] == "aimlapi"));
+    }
 
     #[test]
     fn split_manual_args_detects_demo_command() {

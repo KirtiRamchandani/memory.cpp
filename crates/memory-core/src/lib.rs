@@ -105,4 +105,6 @@ pub use types::{
 };
 
 #[cfg(feature = "http")]
-pub use embedding::{OllamaEmbedder, OpenAiCompatibleEmbedder};
+pub use embedding::{
+    AimlapiEmbedder, OllamaEmbedder, OpenAiCompatibleEmbedder, AIMLAPI_DEFAULT_MODEL,
+};

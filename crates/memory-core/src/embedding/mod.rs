@@ -8,7 +8,9 @@ mod providers;
 pub use hash::{FastEmbedOnnxEmbedder, HashEmbedder};
 
 #[cfg(feature = "http")]
-pub use providers::{OllamaEmbedder, OpenAiCompatibleEmbedder};
+pub use providers::{
+    AimlapiEmbedder, OllamaEmbedder, OpenAiCompatibleEmbedder, AIMLAPI_DEFAULT_MODEL,
+};
 
 use crate::Result;
 
